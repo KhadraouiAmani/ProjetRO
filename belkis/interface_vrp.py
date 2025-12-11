@@ -20,7 +20,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
 
-from projet_optimisation import VRPTransportFonds
+from belkis.projet_optimisation import VRPTransportFonds
 
 # --- Thread pour ne pas bloquer l'IHM ---
 class WorkerThread(QThread):

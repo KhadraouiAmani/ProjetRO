@@ -1,22 +1,22 @@
 import sys
 import os
 import time
-import math  # Important pour le calcul des suggestions (ceil)
+import math
 import numpy as np
 
 # PyQt5 Imports
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QTextEdit, QSpinBox,
                              QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-                             QMessageBox, QSplitter, QTabWidget, QAbstractItemView)
+                             QMessageBox, QSplitter, QTabWidget, QAbstractItemView, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
 
-# Matplotlib Integration
+# Matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# les modules
+# Modules
 try:
     from build_A_dynamic import read_coords_csv, build_matrices
     from solver_dynamic import solve_dynamic_expected
@@ -25,9 +25,7 @@ try:
 except ImportError:
     pass
 
-# ---------- Stylesheet ----------
-#C'est du code CSS. Il définit l'apparence
-# pour que l'application ne ressemble pas à un vieux logiciel Windows 95.
+# Stylesheet (inchangé)
 STYLE = """
 QWidget { background-color: #f4f6f9; font-family: 'Segoe UI', Arial; color: #333; }
 QPushButton { background-color: #2c3e50; color: white; border-radius: 5px; padding: 8px 15px; font-weight: bold; }
@@ -41,12 +39,9 @@ QTabWidget::pane { border: 1px solid #bdc3c7; top: -1px; }
 QTabBar::tab { background: #bdc3c7; padding: 8px 20px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
 QTabBar::tab:selected { background: #ecf0f1; border-bottom-color: #ecf0f1; font-weight: bold; }
 QProgressBar { border: none; border-radius: 4px; height: 12px; background: #e2e8f0; }
-QProgressBar::chunk { background-color: #27ae60; border-radius: 4px; }
 QTextEdit { border: 1px solid #bdc3c7; border-radius: 6px; background: white; font-family: Consolas, monospace; }
 """
 
-#pour les graphiques matplotlib intégrés
-# ---------- Matplotlib Canvas ----------
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
@@ -56,10 +51,6 @@ class MplCanvas(FigureCanvas):
         self.fig.tight_layout()
         super(MplCanvas, self).__init__(self.fig)
 
-
-# ---------- Thread de Simulation ----------
-#n Thread séparé pour la simulation
-#  Cela permet de calculer les déplacements des ambulances en arrière-plan tout en gardant l'interface fluide et réactive
 class SimThread(QThread):
     mission_signal = pyqtSignal(object)        
     progress_signal = pyqtSignal(int, int)     
@@ -96,14 +87,10 @@ class SimThread(QThread):
     def pause(self): self._pause = True
     def resume(self): self._pause = False
 
-
-# ---------- GUI Principal ----------
-#L'interface est divisée ergonomiquement :
-#  les contrôles en haut, les données analytiques à gauche (matrices) et la visualisation géographique à droite.
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('EMS Optimizer Pro - Aide à la Décision')
+        self.setWindowTitle('EMS Optimizer Pro - Gestion Budgétaire')
         self.resize(1400, 850)
         self.setStyleSheet(STYLE)
         
@@ -121,21 +108,30 @@ class MainWindow(QWidget):
         top_layout.addWidget(self.btn_export_map)
         main_layout.addLayout(top_layout)
 
-        # 2. Paramètres
+        # 2. Paramètres (Physiques + Budget)
         params_layout = QHBoxLayout()
+        
+        # Physiques
         self.spin_vmax = QSpinBox(); self.spin_vmax.setRange(10,150); self.spin_vmax.setValue(50)
         self.spin_tmax = QSpinBox(); self.spin_tmax.setRange(1,240); self.spin_tmax.setValue(15)
         self.spin_lambda = QSpinBox(); self.spin_lambda.setRange(1,5000); self.spin_lambda.setValue(100)
+        
+        # Budget (NOUVEAU)
+        self.spin_budget = QDoubleSpinBox(); self.spin_budget.setRange(0, 100000000); self.spin_budget.setValue(1000000)
+        self.spin_cost = QDoubleSpinBox(); self.spin_cost.setRange(0, 1000000); self.spin_cost.setValue(150000)
+        
+        # Ajout au layout
         params_layout.addWidget(QLabel("<b>Vitesse (km/h):</b>")); params_layout.addWidget(self.spin_vmax)
         params_layout.addWidget(QLabel("<b>Tmax (min):</b>")); params_layout.addWidget(self.spin_tmax)
-        params_layout.addWidget(QLabel("<b>Demandes/Heure (λ):</b>")); params_layout.addWidget(self.spin_lambda)
-        params_layout.addStretch()
+        params_layout.addWidget(QLabel("<b>Budget Total:</b>")); params_layout.addWidget(self.spin_budget)
+        params_layout.addWidget(QLabel("<b>Coût/Amb.:</b>")); params_layout.addWidget(self.spin_cost)
+        
         main_layout.addLayout(params_layout)
 
         # 3. Actions
         action_layout = QHBoxLayout()
         self.btn_build = QPushButton('⚙️ 3. Construire Matrice')
-        self.btn_solve = QPushButton('🚀 4. Optimiser')
+        self.btn_solve = QPushButton('🚀 4. Optimiser (avec Budget)')
         self.btn_start = QPushButton('▶ 5. Simulation')
         self.btn_start.setObjectName("success")
         self.btn_pause = QPushButton('⏸ Pause')
@@ -146,22 +142,19 @@ class MainWindow(QWidget):
         action_layout.addWidget(self.btn_start); action_layout.addWidget(self.btn_pause); action_layout.addWidget(self.btn_stop)
         main_layout.addLayout(action_layout)
 
-        # 4. Splitter Central
+        # 4. Central Splitter
         splitter = QSplitter(Qt.Horizontal)
         
-        # --- GAUCHE ---
         left_widget = QWidget(); left_layout = QVBoxLayout(left_widget)
         self.tabs = QTabWidget()
         
-        # Onglet 1 : Matrice
         self.table_matrix = QTableWidget(); self.table_matrix.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabs.addTab(self.table_matrix, "📐 Matrice A (Heatmap)")
+        self.tabs.addTab(self.table_matrix, "📐 Matrice A")
         
-        # Onglet 2 : Simulation
         self.table_hops = QTableWidget(0, 3)
-        self.table_hops.setHorizontalHeaderLabels(['Hôpital', 'Capacité', 'Dispo Live'])
+        self.table_hops.setHorizontalHeaderLabels(['Hôpital', 'Ambulances', 'Dispo Live'])
         self.table_hops.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tabs.addTab(self.table_hops, "🚑 Simulation")
+        self.tabs.addTab(self.table_hops, "🚑 Résultat & Simu")
         
         left_layout.addWidget(self.tabs)
         left_layout.addWidget(QLabel("<b>Journal :</b>"))
@@ -170,7 +163,6 @@ class MainWindow(QWidget):
         self.progress = QProgressBar(); left_layout.addWidget(self.progress)
         splitter.addWidget(left_widget)
 
-        # --- DROITE ---
         right_widget = QWidget(); right_layout = QVBoxLayout(right_widget)
         self.canvas = MplCanvas(self); right_layout.addWidget(self.canvas)
         splitter.addWidget(right_widget)
@@ -178,11 +170,9 @@ class MainWindow(QWidget):
         main_layout.addWidget(splitter)
         self.setLayout(main_layout)
 
-        # Interne
         self.addrs = []; self.hops = []; self.A = None; self.x_sol = None
         self.sim = None; self.sim_thread = None; self.mapfile = None; self.active_lines = {}
 
-        # Signaux
         self.btn_load_addrs.clicked.connect(self.load_addrs)
         self.btn_load_hops.clicked.connect(self.load_hops)
         self.btn_build.clicked.connect(self.build_A)
@@ -209,105 +199,90 @@ class MainWindow(QWidget):
             for i, (x, y) in enumerate(zip(hx, hy)): self.canvas.ax.text(x, y, f" H{i}", fontsize=9, fontweight='bold')
         self.canvas.ax.legend(); self.canvas.draw()
 
-  
     def build_A(self):
-        if not self.addrs or not self.hops:
-            QMessageBox.warning(self, "Erreur", "Veuillez charger les fichiers CSV.")
-            return
-
+        if not self.addrs or not self.hops: QMessageBox.warning(self, "Erreur", "Données manquantes"); return
         try:
-            # Récupération des paramètres actuels
-            current_vmax = self.spin_vmax.value()
-            current_tmax = self.spin_tmax.value()
-
-            # Calcul des matrices
+            current_vmax = self.spin_vmax.value(); current_tmax = self.spin_tmax.value()
             self.A, self.dist, self.times = build_matrices(self.addrs, self.hops, current_vmax, current_tmax)
-            self.log.append(f"✅ Matrice construite : {self.A.shape}")
+            self.log.append(f"✅ Matrice A construite : {self.A.shape}")
 
-            # --- 1. AFFICHAGE DE LA HEATMAP (COULEURS) ---
             rows, cols = self.A.shape
-            self.table_matrix.setRowCount(rows)
-            self.table_matrix.setColumnCount(cols)
+            self.table_matrix.setRowCount(rows); self.table_matrix.setColumnCount(cols)
             self.table_matrix.setHorizontalHeaderLabels([f"H{j}" for j in range(cols)])
             self.table_matrix.setVerticalHeaderLabels([f"A{i}" for i in range(rows)])
 
             for i in range(rows):
                 for j in range(cols):
                     val = self.A[i, j]
-                    item = QTableWidgetItem(str(val))
-                    item.setTextAlignment(Qt.AlignCenter)
-                    if val == 1:
-                        item.setBackground(QColor("#2ecc71")) # Vert
-                        item.setForeground(QColor("white"))
-                    else:
-                        item.setBackground(QColor("#ecf0f1")) # Gris
-                        item.setForeground(QColor("#95a5a6"))
+                    item = QTableWidgetItem(str(val)); item.setTextAlignment(Qt.AlignCenter)
+                    if val == 1: item.setBackground(QColor("#2ecc71")); item.setForeground(QColor("white"))
+                    else: item.setBackground(QColor("#ecf0f1")); item.setForeground(QColor("#95a5a6"))
                     self.table_matrix.setItem(i, j, item)
             
             self.table_matrix.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.tabs.setCurrentIndex(0)
 
-            # --- 2. LOGIQUE DE SUGGESTION (RESTAURÉE) ---
-            # On cherche les adresses non couvertes (somme ligne = 0)
-            row_sums = self.A.sum(axis=1)
-            unreachable_indices = np.where(row_sums == 0)[0]
-            count_unreach = len(unreachable_indices)
-
-            if count_unreach > 0:
-                # Calculs pour suggestions
-                times_for_unreach = self.times[unreachable_indices]
-                min_times = np.min(times_for_unreach, axis=1) # Meilleur temps actuel pour ces adresses
-                suggested_tmax = np.max(min_times)            # Le pire des meilleurs temps
-
-                dists_for_unreach = self.dist[unreachable_indices]
-                min_dists = np.min(dists_for_unreach, axis=1)
-                worst_dist = np.max(min_dists)
-
-                # Vitesse suggérée = Distance / Temps (où Temps = Tmax actuel)
-                suggested_vmax = worst_dist / (current_tmax / 60.0)
-
-                # Arrondis
-                sugg_t = math.ceil(suggested_tmax)
-                sugg_v = math.ceil(suggested_vmax)
-
-                msg = (f"⚠️ <b>{count_unreach} adresse(s) sont inatteignables.</b><br><br>"
-                       f"Avec vos paramètres actuels, les ambulances n'arrivent pas à temps.<br>"
-                       f"Voici les valeurs minimales suggérées pour tout couvrir :<br><br>"
-                       f"👉 <b>Tmax suggéré :</b> {sugg_t} min (au lieu de {current_tmax})<br>"
-                       f"OU<br>"
-                       f"👉 <b>Vitesse suggérée :</b> {sugg_v} km/h (au lieu de {current_vmax})")
+            # Suggestions
+            unreach = np.where(self.A.sum(axis=1) == 0)[0]
+            if len(unreach) > 0:
+                times_un = self.times[unreach]; min_t = np.min(times_un, axis=1); sugg_t = math.ceil(np.max(min_t))
+                dists_un = self.dist[unreach]; min_d = np.min(dists_un, axis=1); worst_d = np.max(min_d)
+                sugg_v = math.ceil(worst_d / (current_tmax/60.0))
                 
-                QMessageBox.warning(self, "Suggestions Intelligentes", msg)
-                self.log.append(f"⚠️ ALERTE : {count_unreach} adresses non couvertes. Suggestion Tmax > {sugg_t} min.")
-
-                # Marquer les points noirs sur la carte
+                msg = (f"⚠️ <b>{len(unreach)} adresses inatteignables.</b><br>"
+                       f"👉 Tmax suggéré: {sugg_t} min<br>👉 Vitesse suggérée: {sugg_v} km/h")
+                QMessageBox.warning(self, "Alerte", msg)
+                self.log.append(f"⚠️ {len(unreach)} adresses non couvertes.")
                 try:
-                    unreach_x = [self.addrs[i][0] for i in unreachable_indices]
-                    unreach_y = [self.addrs[i][1] for i in unreachable_indices]
-                    self.canvas.ax.scatter(unreach_x, unreach_y, c='black', marker='x', s=80, label='INATTEIGNABLE', zorder=10)
-                    self.canvas.draw()
+                    ux = [self.addrs[i][0] for i in unreach]; uy = [self.addrs[i][1] for i in unreach]
+                    self.canvas.ax.scatter(ux, uy, c='black', marker='x', s=80, label='INATTEIGNABLE', zorder=10); self.canvas.draw()
                 except: pass
-            else:
-                self.log.append("✅ Couverture totale possible avec ces paramètres.")
 
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", str(e))
+        except Exception as e: QMessageBox.critical(self, "Erreur", str(e))
 
+    # --- FONCTION MODIFIÉE POUR APPELER LE NOUVEAU SOLVEUR ---
     def solve(self):
         if self.A is None: return
+        
+        # Récupération des valeurs budget
+        budget = self.spin_budget.value()
+        cost = self.spin_cost.value()
+        
+        # Log pour l'utilisateur
+        self.log.append(f"⏳ Optimisation... Budget={budget:,.0f}, Coût/U={cost:,.0f}")
+        
         p = [0.1] * self.A.shape[1]
-        self.x_sol, total = solve_dynamic_expected(self.A, p)
+        
+        # Appel avec les nouveaux paramètres
+        self.x_sol, total_ambs = solve_dynamic_expected(
+            self.A, 
+            p, 
+            budget=budget, 
+            cost_per_amb=cost, 
+            min_per_hop=1  # <--- FORCE AU MOINS 1 PAR HÔPITAL
+        )
+        
         if self.x_sol:
-            self.log.append(f"🏆 Optimisation : {total} ambulances.")
+            cout_total = total_ambs * cost
+            self.log.append(f"✅ Solution trouvée : {total_ambs} ambulances.")
+            self.log.append(f"💰 Coût total : {cout_total:,.0f} (Budget restant : {budget - cout_total:,.0f})")
+            
             self.table_hops.setRowCount(len(self.hops))
             for j, count in enumerate(self.x_sol):
                 self.table_hops.setItem(j, 0, QTableWidgetItem(f"Hôpital {j}"))
                 self.table_hops.setItem(j, 1, QTableWidgetItem(str(count)))
                 self.table_hops.setItem(j, 2, QTableWidgetItem(str(count)))
+            
             self.tabs.setCurrentIndex(1)
             self.mapfile = create_map(self.addrs, self.hops, self.x_sol, mapfile='res_optim.html')
         else:
-            QMessageBox.warning(self, "Echec", "Pas de solution trouvée.")
+            msg = "❌ <b>Pas de solution possible.</b><br><br>" \
+                  "Causes possibles :<br>" \
+                  "1. Budget insuffisant pour mettre 1 ambulance partout.<br>" \
+                  "2. Budget insuffisant pour couvrir toutes les adresses.<br>" \
+                  "3. Adresses géographiquement inatteignables."
+            QMessageBox.critical(self, "Echec", msg)
+            self.log.append("❌ Echec optimisation (Infeasible).")
 
     def start_sim(self):
         if not self.x_sol: return

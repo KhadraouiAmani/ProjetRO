@@ -1,7 +1,6 @@
 #version finale du projet
 """
 OptiRoute_Ultimate_Edition.py
-
 Logiciel d'Optimisation de Tournées (VRPTW) - Version Enterprise Finale.
 Fonctionnalités : Moteur Gurobi, Validation Stricte, Sauvegarde JSON, Export CSV.
 """
@@ -10,6 +9,7 @@ import sys
 import json
 import csv
 import numpy as np
+
 from PyQt6 import QtWidgets, QtCore, QtGui
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -19,7 +19,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QIcon
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
+# Sécurisation de l'import Matplotlib pour compatibilité Hub
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+except ImportError:
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
@@ -67,39 +72,39 @@ except ImportError:
     Model, GRB, quicksum = None, None, None
 
 # -----------------------------
-# COMPOSANT KPI
-# -----------------------------
-class KPI_Card(QFrame):
-    def __init__(self, title, icon, color=C_SUCCESS):
-        super().__init__()
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: white; border-radius: 8px;
-                border-left: 5px solid {color}; border: 1px solid #ecf0f1;
-            }}
-        """)
-        self.setMinimumWidth(130)
-        layout = QVBoxLayout()
-        layout.setContentsMargins(15, 10, 15, 10)
-        
-        self.lbl_title = QLabel(f"{icon}  {title}")
-        self.lbl_title.setStyleSheet("color: #95a5a6; font-size: 11px; font-weight: bold; text-transform: uppercase;")
-        self.lbl_value = QLabel("-")
-        self.lbl_value.setStyleSheet(f"color: {C_PRIMARY}; font-size: 20px; font-weight: bold;")
-        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        layout.addWidget(self.lbl_title)
-        layout.addWidget(self.lbl_value)
-        self.setLayout(layout)
-        
-    def set_value(self, text):
-        self.lbl_value.setText(text)
-
-# -----------------------------
 # FENÊTRE PRINCIPALE
 # -----------------------------
 class OptiRouteWindow(QMainWindow):
+    
+    # --- CLASSE INTERNE POUR KPI (Cachée du Hub) ---
+    class KPI_Card(QFrame):
+        def __init__(self, title, icon, color=C_SUCCESS):
+            super().__init__()
+            self.setFrameShape(QFrame.Shape.StyledPanel)
+            self.setStyleSheet(f"""
+                QFrame {{
+                    background-color: white; border-radius: 8px;
+                    border-left: 5px solid {color}; border: 1px solid #ecf0f1;
+                }}
+            """)
+            self.setMinimumWidth(130)
+            layout = QVBoxLayout()
+            layout.setContentsMargins(15, 10, 15, 10)
+            
+            self.lbl_title = QLabel(f"{icon}  {title}")
+            self.lbl_title.setStyleSheet("color: #95a5a6; font-size: 11px; font-weight: bold; text-transform: uppercase;")
+            self.lbl_value = QLabel("-")
+            self.lbl_value.setStyleSheet(f"color: {C_PRIMARY}; font-size: 20px; font-weight: bold;")
+            self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            layout.addWidget(self.lbl_title)
+            layout.addWidget(self.lbl_value)
+            self.setLayout(layout)
+            
+        def set_value(self, text):
+            self.lbl_value.setText(text)
+    # -----------------------------------------------
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Route optimale - Réparateur de distributeurs automatiques")
@@ -180,9 +185,10 @@ class OptiRouteWindow(QMainWindow):
         right_layout.addWidget(lbl_dash)
 
         kpi_layout = QHBoxLayout()
-        self.kpi_dist = KPI_Card("Distance Totale", "📏", C_ACCENT)
-        self.kpi_time = KPI_Card("Heure Retour", "🏁", C_WARNING)
-        self.kpi_stat = KPI_Card("Statut", "🤖", C_PRIMARY)
+        # Appel via self.KPI_Card car la classe est maintenant interne
+        self.kpi_dist = self.KPI_Card("Distance Totale", "📏", C_ACCENT)
+        self.kpi_time = self.KPI_Card("Heure Retour", "🏁", C_WARNING)
+        self.kpi_stat = self.KPI_Card("Statut", "🤖", C_PRIMARY)
         kpi_layout.addWidget(self.kpi_dist)
         kpi_layout.addWidget(self.kpi_time)
         kpi_layout.addWidget(self.kpi_stat)
@@ -216,32 +222,26 @@ class OptiRouteWindow(QMainWindow):
 
     # --- ACTIONS & MENUS ---
     def _create_actions(self):
-        # Nouveau
         self.act_new = QAction("Nouveau", self)
         self.act_new.setShortcut("Ctrl+N")
         self.act_new.triggered.connect(self.on_reset)
 
-        # Ouvrir
         self.act_open = QAction("Ouvrir un scénario...", self)
         self.act_open.setShortcut("Ctrl+O")
         self.act_open.triggered.connect(self.load_from_json)
 
-        # Sauvegarder
         self.act_save = QAction("Sauvegarder le scénario...", self)
         self.act_save.setShortcut("Ctrl+S")
         self.act_save.triggered.connect(self.save_to_json)
 
-        # Exporter
         self.act_export = QAction("Exporter les résultats (CSV)...", self)
         self.act_export.setShortcut("Ctrl+E")
         self.act_export.triggered.connect(self.export_to_csv)
 
-        # Quitter
         self.act_exit = QAction("Quitter", self)
         self.act_exit.setShortcut("Ctrl+Q")
         self.act_exit.triggered.connect(self.close)
 
-        # About
         self.act_about = QAction("À propos", self)
         self.act_about.triggered.connect(self.show_about)
 
@@ -256,7 +256,6 @@ class OptiRouteWindow(QMainWindow):
         file_menu.addAction(self.act_export)
         file_menu.addSeparator()
         file_menu.addAction(self.act_exit)
-
         help_menu = menu.addMenu("&Aide")
         help_menu.addAction(self.act_about)
 
@@ -266,21 +265,16 @@ class OptiRouteWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         
-        # Boutons textes simulés comme icônes pour le style
         btn_new = QPushButton("✨ Nouveau")
         btn_new.clicked.connect(self.on_reset)
         toolbar.addWidget(btn_new)
-
         btn_open = QPushButton("📂 Ouvrir")
         btn_open.clicked.connect(self.load_from_json)
         toolbar.addWidget(btn_open)
-
         btn_save = QPushButton("💾 Sauvegarder")
         btn_save.clicked.connect(self.save_to_json)
         toolbar.addWidget(btn_save)
-
         toolbar.addSeparator()
-
         btn_export = QPushButton("📊 Exporter CSV")
         btn_export.clicked.connect(self.export_to_csv)
         toolbar.addWidget(btn_export)
@@ -302,7 +296,7 @@ class OptiRouteWindow(QMainWindow):
         self.dist_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         for i in range(N):
             for j in range(N):
-                if not self.dist_table.item(i, j): # Preserve data if resizing up
+                if not self.dist_table.item(i, j): 
                     val = "0" if i==j else "15"
                     self.dist_table.setItem(i, j, QTableWidgetItem(val))
 
@@ -324,37 +318,25 @@ class OptiRouteWindow(QMainWindow):
                 self.tw_table.setItem(i, 1, QTableWidgetItem(max_s))
 
     def on_reset(self):
-        # Création manuelle de la boîte pour personnaliser les boutons
         box = QMessageBox(self)
         box.setWindowTitle("Nouveau Projet")
         box.setText("Tout effacer et recommencer ?")
         box.setIcon(QMessageBox.Icon.Question)
-        
-        # Ajout des boutons avec texte personnalisé
-        # On garde les "Rôles" (YesRole/NoRole) pour que la logique reste la même
         btn_oui = box.addButton("Oui", QMessageBox.ButtonRole.YesRole)
         btn_non = box.addButton("Non", QMessageBox.ButtonRole.NoRole)
-        
-        # Affichage
         box.exec()
-        
-        # Vérification du bouton cliqué
         if box.clickedButton() == btn_oui:
             self.spin_n.blockSignals(True)
             self.spin_n.setValue(3)
             self.spin_n.blockSignals(False)
             self.edit_max_shift.setText("480")
-            
-            # Force clean
             self.dist_table.clearContents()
             self.service_table.clearContents()
             self.tw_table.clearContents()
             self.create_tables()
-            
             self.results_text.clear()
             self.ax.clear()
             self.canvas.draw()
-            
             self.kpi_dist.set_value("-")
             self.kpi_time.set_value("-")
             self.kpi_stat.set_value("Prêt")
@@ -363,9 +345,8 @@ class OptiRouteWindow(QMainWindow):
         
     # --- SAUVEGARDE / CHARGEMENT (JSON) ---
     def get_current_data(self):
-        """Récupère toutes les données de l'interface sous forme de dictionnaire."""
         try:
-            N, dist, service, tw_e, tw_l, max_shift = self.read_inputs() # Reuse logic valid
+            N, dist, service, tw_e, tw_l, max_shift = self.read_inputs() 
             return {
                 "n_clients": self.spin_n.value(),
                 "max_shift": self.edit_max_shift.text(),
@@ -375,14 +356,13 @@ class OptiRouteWindow(QMainWindow):
                 "tw_l": tw_l.tolist()
             }
         except ValueError as e:
-            return None # Données invalides pour sauvegarde
+            return None 
 
     def save_to_json(self):
         data = self.get_current_data()
         if not data:
-            QMessageBox.warning(self, "Impossible de sauvegarder", "Les données actuelles contiennent des erreurs.\nVeuillez les corriger avant de sauvegarder.")
+            QMessageBox.warning(self, "Impossible de sauvegarder", "Les données actuelles contiennent des erreurs.")
             return
-
         file_path, _ = QFileDialog.getSaveFileName(self, "Sauvegarder Scénario", "", "Fichiers JSON (*.json)")
         if file_path:
             try:
@@ -399,31 +379,23 @@ class OptiRouteWindow(QMainWindow):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-
-                # Appliquer les données
                 self.spin_n.setValue(data["n_clients"])
                 self.edit_max_shift.setText(data["max_shift"])
-                self.create_tables() # Redimensionne
-
-                # Remplir Tables
+                self.create_tables() 
                 N = data["n_clients"] + 1
                 dist = data["dist"]
                 service = data["service"]
                 tw_e = data["tw_e"]
                 tw_l = data["tw_l"]
-
                 for i in range(N):
                     for j in range(N):
                         self.dist_table.setItem(i, j, QTableWidgetItem(str(dist[i][j])))
                     self.service_table.setItem(i, 0, QTableWidgetItem(str(service[i])))
                     self.tw_table.setItem(i, 0, QTableWidgetItem(str(tw_e[i])))
                     self.tw_table.setItem(i, 1, QTableWidgetItem(str(tw_l[i])))
-
                 self.status.showMessage(f"Chargé : {file_path}")
                 self.kpi_stat.set_value("Chargé")
-                # Reset resultats
                 self.results_text.clear(); self.ax.clear(); self.canvas.draw()
-
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Fichier invalide ou corrompu : {e}")
 
@@ -432,19 +404,16 @@ class OptiRouteWindow(QMainWindow):
         if not self.last_schedule_data:
             QMessageBox.warning(self, "Rien à exporter", "Veuillez d'abord lancer une optimisation réussie.")
             return
-
         file_path, _ = QFileDialog.getSaveFileName(self, "Exporter Résultats", "Resultats_Tournee.csv", "Fichiers CSV (*.csv)")
         if file_path:
             try:
                 with open(file_path, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f, delimiter=';') # Point-virgule pour Excel fr
+                    writer = csv.writer(f, delimiter=';') 
                     writer.writerow(["Type", "Noeud", "Arrivee en minutes", "Service en minutes", "Depart en minutes"])
-                    
                     for step in self.last_schedule_data:
                         node_name = f"Client {step['n']}" if step['n'] > 0 else "Dépôt"
                         writer.writerow([
-                            step['t'], 
-                            node_name, 
+                            step['t'], node_name, 
                             f"{step['a']:.2f}".replace('.', ','), 
                             f"{step['s']:.2f}".replace('.', ','), 
                             f"{step['d']:.2f}".replace('.', ',')
@@ -513,66 +482,47 @@ class OptiRouteWindow(QMainWindow):
             raise ValueError("\n".join(d_err))
         return N, dist, service, tw_e, tw_l, max_shift
 
-
     # --- MOTEUR D'OPTIMISATION FLEXIBLE ---
     def solve_engine(self, N, dist, serv, tw_e, tw_l, time_limit, must_visit_all=True):
-        """
-        Résout le problème. 
-        Si must_visit_all=False, autorise à zapper des clients (Prize Collecting).
-        """
         model = Model("VRPTW_Smart")
         model.setParam('OutputFlag', 0)
         
-        x = {}; t = {}; y = {} # y[i] = 1 si le client est visité, 0 sinon
+        x = {}; t = {}; y = {} 
         
-        # Variables
         for i in range(N):
-            # Si on force la visite (Phase 1) ou si c'est le dépôt, y=1
             if must_visit_all or i == 0:
                 y[i] = 1 
             else:
                 y[i] = model.addVar(vtype=GRB.BINARY, name=f"visit_{i}")
-
             for j in range(N):
                 if i != j: x[i,j] = model.addVar(vtype=GRB.BINARY)
-            
             t[i] = model.addVar(lb=tw_e[i], ub=tw_l[i], vtype=GRB.CONTINUOUS)
 
         t_end = model.addVar(lb=0, ub=time_limit, vtype=GRB.CONTINUOUS)
 
-        # Objectif
         dist_cost = quicksum(dist[i,j]*x[i,j] for i in range(N) for j in range(N) if i!=j)
         
         if must_visit_all:
             model.setObjective(dist_cost, GRB.MINIMIZE)
         else:
-            # Maximiser les visites = Minimiser les "Non-Visites" avec une pénalité énorme
-            # Pénalité > Distance max possible pour prioriser le service client
             penalty = 100000 
             missed_cost = quicksum(penalty * (1 - y[i]) for i in range(1, N))
             model.setObjective(dist_cost + missed_cost, GRB.MINIMIZE)
 
-        # Contraintes de Flux liées à y[i]
         for i in range(N):
-            # On doit sortir de i exactement y[i] fois
             model.addConstr(quicksum(x[i,j] for j in range(N) if i!=j) == y[i])
-            # On doit entrer dans i exactement y[i] fois
             model.addConstr(quicksum(x[j,i] for j in range(N) if i!=j) == y[i])
 
-        # Contraintes de Temps (MTZ)
         M = time_limit + 1000
         for i in range(N):
             for j in range(1, N):
                 if i!=j:
                     model.addConstr(t[j] >= t[i] + serv[i] + dist[i,j] - M*(1-x[i,j]))
         
-        # Retour Dépôt
         for i in range(1, N):
             model.addConstr(t_end >= t[i] + serv[i] + dist[i,0] - M*(1-x[i,0]))
         
-        # Limite stricte de temps passée en argument
         model.addConstr(t_end <= time_limit)
-
         model.optimize()
         return model, x, t, t_end, y
     
@@ -586,45 +536,28 @@ class OptiRouteWindow(QMainWindow):
             self.kpi_stat.set_value("Erreur")
             return
         
-        # --- CHECK LOGIQUE (Avertissement Utilisateur) ---
         depot_close = tw_l[0]
         if max_shift > depot_close:
-            msg_text = (f"La durée max définie ({max_shift} min) est supérieure à l'heure de fermeture du dépôt ({depot_close} min).\n\n"
-                        f"Le camion devra impérativement rentrer avant {depot_close} min.\n"
-                        f"Cela risque de réduire le nombre de clients visités.\n\n"
-                        f"Voulez-vous continuer avec cette contrainte ?")
-
-            # Boîte de dialogue personnalisée (Oui/Non)
+            msg_text = (f"La durée max définie ({max_shift} min) est supérieure à l'heure de fermeture du dépôt ({depot_close} min).\n"
+                        f"Le camion devra rentrer avant {depot_close} min.\n"
+                        f"Voulez-vous continuer ?")
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
             box.setWindowTitle("Avertissement Logique")
             box.setText(msg_text)
-            
             btn_oui = box.addButton("Oui, continuer", QMessageBox.ButtonRole.YesRole)
             btn_non = box.addButton("Non, annuler", QMessageBox.ButtonRole.NoRole)
-            
             box.exec()
-
             if box.clickedButton() == btn_non:
-                self.status.showMessage("Optimisation annulée par l'utilisateur.")
+                self.status.showMessage("Optimisation annulée.")
                 return
-        # -------------------------------------------------
 
-
-        depot_close = tw_l[0]
-        
-        self.status.showMessage("Calcul en cours (Phase 1 & 2)...")
+        self.status.showMessage("Calcul en cours...")
         QApplication.processEvents()
 
-        # --- PHASE 1 : ROUTE PRÉVUE (THÉORIQUE) ---
-        # On ignore la fermeture du dépôt, on utilise juste max_shift.
-        # On force la visite de tous les clients.
         model_theo, _, _, _, _ = self.solve_engine(N, dist, service, tw_e, tw_l, max_shift, must_visit_all=True)
         is_theo_feasible = (model_theo.status == GRB.OPTIMAL)
         
-        # --- PHASE 2 : ROUTE EFFECTUÉE (RÉELLE) ---
-        # On respecte STRICTEMENT la fermeture du dépôt ou max_shift (le plus petit des deux).
-        # On autorise le "Prize Collecting" (zapper des clients).
         real_limit = min(max_shift, depot_close)
         model_real, x_re, t_re, t_end_re, y_re = self.solve_engine(N, dist, service, tw_e, tw_l, real_limit, must_visit_all=False)
 
@@ -633,16 +566,13 @@ class OptiRouteWindow(QMainWindow):
             QMessageBox.critical(self, "Echec", "Le solveur n'a pas trouvé de solution.")
             return
 
-        # Analyse des résultats réels
         visited = []
         missed = []
         for i in range(1, N):
-            # y_re[i] peut être un float (0.0 ou 1.0) ou un objet Var
             val = y_re[i].X if hasattr(y_re[i], "X") else y_re[i]
             if val > 0.5: visited.append(i)
             else: missed.append(i)
 
-        # Statut pour le KPI
         if len(missed) > 0:
             self.kpi_stat.set_value("Partiel")
             self.status.showMessage(f"Terminé. {len(missed)} clients non livrés.")
@@ -650,11 +580,9 @@ class OptiRouteWindow(QMainWindow):
             self.kpi_stat.set_value("Optimal")
             self.status.showMessage("Succès. Tous les clients livrés.")
 
-        # Affichage
         self.display_smart_visuals(x_re, t_re, t_end_re, visited, missed, N, service, dist, tw_e, is_theo_feasible, depot_close)
 
     def display_smart_visuals(self, x, t, t_end, visited, missed, N, service, dist, tw_e, is_theo_feasible, depot_close):
-        # 1. Reconstitution du chemin (uniquement les nœuds visités)
         tour = [0]
         curr = 0
         arcs = []
@@ -669,10 +597,8 @@ class OptiRouteWindow(QMainWindow):
                     break
             if curr == 0 or not found: break
         
-        # 2. Calcul Timeline
         self.last_schedule_data = []
         cur_t = 0.0
-        # Dépôt Start
         start = max(cur_t, tw_e[0])
         end = start + service[0]
         self.last_schedule_data.append({"n":0, "t":"Départ Dépôt", "a":start, "s":service[0], "d":end})
@@ -690,20 +616,16 @@ class OptiRouteWindow(QMainWindow):
             cur_t = s_end
             prev = n
             
-        # Retour Dépôt
         tr = dist[prev, 0]
         tot_d += tr
         arr = cur_t + tr
         self.last_schedule_data.append({"n":0, "t":"Retour Dépôt", "a":arr, "s":0, "d":arr})
 
-        # --- KPIs ---
         self.kpi_dist.set_value(f"{tot_d:.1f} min")
         self.kpi_time.set_value(f"{arr:.1f} min")
         
-        # --- RAPPORT TEXTUEL ---
         html = "<h3 style='color:#2c3e50; font-family: Segoe UI;'>Rapport de Mission</h3>"
         
-        # Bloc d'alerte ou de succès
         if missed:
             html += f"<div style='background-color:#fdedec; border:1px solid {C_DANGER}; padding:10px; border-radius:4px;'>"
             html += f"<b style='color:{C_DANGER}'>⚠️ MISSION PARTIELLE : {len(missed)} client(s) annulé(s).</b><br>"
@@ -713,56 +635,41 @@ class OptiRouteWindow(QMainWindow):
             else:
                 html += "<i>Même sans fermeture du dépôt, la durée max était insuffisante pour tout livrer.</i>"
             html += "</div><br>"
-            
             html += f"<b style='color:{C_DANGER}'>Clients non livrés :</b><ul>"
-            for m in missed:
-                html += f"<li>Client {m}</li>"
+            for m in missed: html += f"<li>Client {m}</li>"
             html += "</ul>"
         else:
             html += f"<div style='background-color:#eafaf1; border:1px solid {C_SUCCESS}; padding:10px; border-radius:4px;'>"
             html += f"<b style='color:{C_SUCCESS}'>✅ MISSION RÉUSSIE : Tous les clients sont livrés.</b>"
             html += "</div><br>"
 
-        # Tableau
         html += "<table width='100%' border='1' cellspacing='0' cellpadding='5' style='border-collapse:collapse; border-color:#ddd;'>"
         html += "<tr style='background:#ecf0f1; color:#2c3e50;'><th>Statut</th><th>Lieu</th><th>Arrivée</th><th>Départ</th></tr>"
         for s in self.last_schedule_data:
             if s['t'] == "Départ Dépôt": color = "#27ae60"
             elif s['t'] == "Retour Dépôt": color = "#c0392b"
             else: color = "#2c3e50"
-            
             nm = "HUB" if s['n']==0 else f"Client {s['n']}"
             html += f"<tr style='color:{color}'><td><b>{s['t']}</b></td><td>{nm}</td><td>{s['a']:.1f}</td><td>{s['d']:.1f}</td></tr>"
         html += "</table>"
         self.results_text.setHtml(html)
 
-        # --- CARTE ---
         self.ax.clear()
         theta = np.linspace(0, 2*np.pi, N, endpoint=False) + np.pi/2
         xs = 10*np.cos(theta); ys = 10*np.sin(theta)
         
-        # 1. Dessiner les arcs actifs
         for (i, j) in arcs:
             self.ax.annotate("", xy=(xs[j], ys[j]), xytext=(xs[i], ys[i]), 
                              arrowprops=dict(arrowstyle="-|>", color=C_PRIMARY, lw=2, shrinkA=15, shrinkB=15, mutation_scale=20), zorder=2)
-        
-        # 2. Points Visités (Bleu)
         for v in visited:
             self.ax.scatter(xs[v], ys[v], s=500, c=C_ACCENT, edgecolors='white', linewidth=2, zorder=3)
-            
-        # 3. Points Manqués (Gris)
         for m in missed:
-            self.ax.scatter(xs[m], ys[m], s=400, c='#bdc3c7', edgecolors='white', linewidth=1, zorder=1) # Gris
-            
-        # 4. Dépôt (Rouge)
+            self.ax.scatter(xs[m], ys[m], s=400, c='#bdc3c7', edgecolors='white', linewidth=1, zorder=1)
         self.ax.scatter(xs[0], ys[0], s=600, c=C_DANGER, marker='s', edgecolors='white', linewidth=2, zorder=3)
-
-        # Labels
         for i in range(N):
             lbl = "HUB" if i==0 else str(i)
             self.ax.text(xs[i], ys[i], lbl, color='white', fontweight='bold', ha='center', va='center', zorder=4, fontsize=9)
             
-        # Légende
         from matplotlib.lines import Line2D
         legend_elem = [
             Line2D([0], [0], marker='o', color='w', markerfacecolor=C_ACCENT, markersize=10, label='Livré'),
@@ -770,7 +677,6 @@ class OptiRouteWindow(QMainWindow):
             Line2D([0], [0], marker='s', color='w', markerfacecolor=C_DANGER, markersize=10, label='Dépôt')
         ]
         self.ax.legend(handles=legend_elem, loc='lower left', fontsize='x-small')
-        
         self.ax.axis('off'); self.ax.set_aspect('equal')
         self.canvas.draw()
 

@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
 import sys # acces aux arguments et fonctions système
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+import os
+
+# --- ADAPTATION HUB : Passage à PyQt6 ---
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QTableWidget, QTableWidgetItem, QPushButton,
                              QLabel, QTextEdit, QTabWidget, QSpinBox, QDoubleSpinBox, QGroupBox,
-                             QHeaderView, QFrame, QScrollArea, QMessageBox) # Ajout de QMessageBox
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+                             QHeaderView, QFrame, QScrollArea, QMessageBox)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtGui import QColor # Nécessaire pour certains styles
+
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+# --- ADAPTATION HUB : Backend compatible PyQt6 ---
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+except ImportError:
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
 import gurobipy as gp
 from gurobipy import GRB
 from itertools import product
@@ -240,7 +250,8 @@ class CuttingStockApp(QWidget):
         # Titre
         title = QLabel("Optimisation de Découpe Industrielle")
         title.setStyleSheet("font-size: 20pt; font-weight: bold; color: #2c3e50; margin-bottom: 10px;")
-        title.setAlignment(Qt.AlignCenter)
+        # Adaptation PyQt6
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.main_layout.addWidget(title)
 
         # ===== CONFIGURATION =====
@@ -294,7 +305,8 @@ class CuttingStockApp(QWidget):
         stock_layout = QVBoxLayout()
         self.stock_table = QTableWidget(2, 3)
         self.stock_table.setHorizontalHeaderLabels(["Longueur (mm)", "Coût (€)", "Disponibilité"])
-        self.stock_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Adaptation PyQt6
+        self.stock_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.stock_table.setAlternatingRowColors(True)
         self.stock_table.setMinimumHeight(200) 
         self.update_stock_table()
@@ -314,7 +326,8 @@ class CuttingStockApp(QWidget):
         self.layout_100.setContentsMargins(10, 10, 10, 10)
         self.demand_table_100 = QTableWidget(4, 2)
         self.demand_table_100.setHorizontalHeaderLabels(["Longueur (mm)", "Quantité"])
-        self.demand_table_100.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Adaptation PyQt6
+        self.demand_table_100.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.demand_table_100.setAlternatingRowColors(True)
         self.update_demand_table_100()
         self.layout_100.addWidget(self.demand_table_100)
@@ -327,7 +340,8 @@ class CuttingStockApp(QWidget):
         self.layout_150.setContentsMargins(10, 10, 10, 10)
         self.demand_table_150 = QTableWidget(3, 2)
         self.demand_table_150.setHorizontalHeaderLabels(["Longueur (mm)", "Quantité"])
-        self.demand_table_150.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Adaptation PyQt6
+        self.demand_table_150.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.demand_table_150.setAlternatingRowColors(True)
         self.update_demand_table_150()
         self.layout_150.addWidget(self.demand_table_150)
@@ -343,7 +357,8 @@ class CuttingStockApp(QWidget):
         buttons_layout.setSpacing(15)
         
         self.run_button = QPushButton("▶️  Lancer l'optimisation")
-        self.run_button.setCursor(Qt.PointingHandCursor)
+        # Adaptation PyQt6
+        self.run_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.run_button.clicked.connect(self.start_solver)
         self.run_button.setMinimumHeight(50)
         self.run_button.setStyleSheet("""
@@ -357,7 +372,8 @@ class CuttingStockApp(QWidget):
         """)
         
         self.reset_button = QPushButton("🔄  Réinitialiser")
-        self.reset_button.setCursor(Qt.PointingHandCursor)
+        # Adaptation PyQt6
+        self.reset_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.reset_button.clicked.connect(self.reset_data)
         self.reset_button.setMinimumHeight(50)
         self.reset_button.setStyleSheet("""
@@ -414,7 +430,8 @@ class CuttingStockApp(QWidget):
                 if self.stock_table.item(i, j) is None:
                     val = defaults[i%len(defaults)][j]
                     item = QTableWidgetItem(val)
-                    item.setTextAlignment(Qt.AlignCenter)
+                    # Adaptation PyQt6
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.stock_table.setItem(i, j, item)
 
     def update_demand_table_100(self):
@@ -431,7 +448,8 @@ class CuttingStockApp(QWidget):
                 if self.demand_table_100.item(i, j) is None:
                     val = defaults[i%len(defaults)][j]
                     item = QTableWidgetItem(val)
-                    item.setTextAlignment(Qt.AlignCenter)
+                    # Adaptation PyQt6
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.demand_table_100.setItem(i, j, item)
 
     def update_demand_table_150(self):
@@ -452,7 +470,8 @@ class CuttingStockApp(QWidget):
                 if self.demand_table_150.item(i, j) is None:
                     val = defaults[i%len(defaults)][j]
                     item = QTableWidgetItem(val)
-                    item.setTextAlignment(Qt.AlignCenter)
+                    # Adaptation PyQt6
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.demand_table_150.setItem(i, j, item)
 
     def reset_data(self):
@@ -476,17 +495,18 @@ class CuttingStockApp(QWidget):
             self.num_types_100_spin.value() >= LIMIT_COMPLEXITY or 
             self.num_types_150_spin.value() >= LIMIT_COMPLEXITY):
             
+            # Adaptation PyQt6 pour QMessageBox
             reply = QMessageBox.question(
                 self, 
                 "Avertissement de performance",
                 "Le nombre de types ou de stocks est élevé (>= 7).\n"
                 "Le calcul risque d'être très long ou de saturer la mémoire (complexité exponentielle).\n\n"
                 "Voulez-vous continuer ?",
-                QMessageBox.Yes | QMessageBox.No, 
-                QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.No
             )
             
-            if reply == QMessageBox.No:
+            if reply == QMessageBox.StandardButton.No:
                 self.result_text.setText("⚠️ Optimisation annulée par l'utilisateur (complexité trop élevée).")
                 return
 
@@ -669,4 +689,5 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = CuttingStockApp()
     window.showMaximized() # Modification : Ouverture en plein écran
-    sys.exit(app.exec_())
+    # Adaptation PyQt6
+    sys.exit(app.exec())

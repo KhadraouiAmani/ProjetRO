@@ -107,7 +107,7 @@ STYLESHEET = """
 # ======================
 # Génération de patterns 
 # ======================
-def generate_patterns(stock_length, pieces, kerf=5):#peices = (longueur, quantité, nom)
+def generate_patterns(stock_length, pieces, kerf=5):#pieces = (longueur, quantité, nom)
     patterns = [] #initialisation liste des patterns
     n = len(pieces) #nombre de types de pièces
     if n == 0: return patterns
@@ -148,7 +148,7 @@ class SolverThread(QThread):#définit un thread pour exécuter le solveur Gurobi
         results = {}
         
         # --- Calcul Diamètre 100 ---
-        if "diameter_100" in self.errors_pre:
+        if "diameter_100" in self.errors_pre: #si erreur pré-existante
             results["diameter_100"] = {"error": self.errors_pre["diameter_100"]}
         else:
             try:
@@ -157,7 +157,7 @@ class SolverThread(QThread):#définit un thread pour exécuter le solveur Gurobi
                 results["diameter_100"] = {"error": str(e)}
 
         # --- Calcul Diamètre 150 ---
-        if "diameter_150" in self.errors_pre:
+        if "diameter_150" in self.errors_pre:#si erreur pré-existante
             results["diameter_150"] = {"error": self.errors_pre["diameter_150"]}
         else:
             try:
@@ -175,7 +175,7 @@ class SolverThread(QThread):#définit un thread pour exécuter le solveur Gurobi
         all_patterns = {}#dictionnaire pour stocker tous les patterns générés
         x_vars = {}#initie un dictionnaire pour les variables de décision 
         for stock_idx, (length, cost, avail) in enumerate(self.stock_data):#pour chaque type de stock
-            stock_name = f"S{stock_idx+1}"#nom du stock
+            stock_name = f"Stock {chr(65+stock_idx)}" #nom du stock (Ex: Stock A)
             patterns = generate_patterns(length, demands, self.kerf)#génération des patterns pour ce stock
             all_patterns[stock_name] = patterns#stockage des patterns générés
             x_vars[stock_name] = {}#dictionnaire pour les variables de décision de ce stock
@@ -186,41 +186,41 @@ class SolverThread(QThread):#définit un thread pour exécuter le solveur Gurobi
             for stock_name in all_patterns:
                 for p_idx, pattern in enumerate(all_patterns[stock_name]):
                     if piece_idx in pattern:
-                        demand_expr += pattern[piece_idx] * x_vars[stock_name][p_idx]
-            model.addConstr(demand_expr >= qty, f"Demand_{name}")
+                        demand_expr += pattern[piece_idx] * x_vars[stock_name][p_idx] #calcule la contribution du pattern à la demande
+            model.addConstr(demand_expr >= qty, f"Demand_{name}")#contrainte de demande (satisfaire la demande)
         stock_exprs = {}
-        for stock_idx, (length, cost, avail) in enumerate(self.stock_data):
-            stock_name = f"S{stock_idx+1}"
-            stock_expr = gp.quicksum(x_vars[stock_name][p] for p in x_vars[stock_name])
-            model.addConstr(stock_expr <= avail, f"Stock_{stock_name}")
+        for stock_idx, (length, cost, avail) in enumerate(self.stock_data):#pour chaque type de stock
+            stock_name = f"Stock {chr(65+stock_idx)}" #nom du stock (Ex: Stock A)
+            stock_expr = gp.quicksum(x_vars[stock_name][p] for p in x_vars[stock_name]) #somme des variables de décision pour ce stock
+            model.addConstr(stock_expr <= avail, f"Stock_{stock_name}") #contrainte de disponibilité du stock(utilisation ≤ disponibilité)
             stock_exprs[stock_name] = stock_expr
-        cost_expr = gp.LinExpr()
-        for stock_idx, (length, cost, avail) in enumerate(self.stock_data):
-            stock_name = f"S{stock_idx+1}"
-            cost_expr += cost * stock_exprs[stock_name]
-        model.setObjective(cost_expr, GRB.MINIMIZE)
-        model.optimize()
-        if model.status == GRB.OPTIMAL:
-            used_patterns = []
-            stock_used = {}
-            num_patterns = {}
+        cost_expr = gp.LinExpr() #expression linéaire pour la fonction objectif (coût total)
+        for stock_idx, (length, cost, avail) in enumerate(self.stock_data):#pour chaque type de stock
+            stock_name = f"Stock {chr(65+stock_idx)}"
+            cost_expr += cost * stock_exprs[stock_name] #coût total = somme des coûts de chaque stock utilisé
+        model.setObjective(cost_expr, GRB.MINIMIZE)# définition de l'objectif (minimiser le coût total)
+        model.optimize() #lancement de l'optimisation
+        if model.status == GRB.OPTIMAL: #si une solution optimale est trouvée
+            used_patterns = [] #liste pour stocker les patterns utilisés dans la solution
+            stock_used = {}#dictionnaire pour stocker la quantité de chaque stock utilisé
+            num_patterns = {} #dictionnaire pour stocker le nombre de patterns générés par type de stock
             for stock_idx, (length, cost, avail) in enumerate(self.stock_data):
-                stock_name = f"S{stock_idx+1}"
-                stock_total = 0
-                num_patterns[stock_name] = len(all_patterns[stock_name])
-                for p_idx in x_vars[stock_name]:
-                    if x_vars[stock_name][p_idx].X > 0.01:
-                        pattern = all_patterns[stock_name][p_idx]
-                        pattern_desc = []
-                        for piece_idx, count in pattern.items():
-                            pattern_desc.append(f"{count}×{demands[piece_idx][2]}")
+                stock_name = f"Stock {chr(65+stock_idx)}"
+                stock_total = 0 #compteur pour la quantité totale utilisée de ce stock
+                num_patterns[stock_name] = len(all_patterns[stock_name]) #nombre de patterns générés pour ce stock
+                for p_idx in x_vars[stock_name]: #pour chaque pattern de ce stock
+                    if x_vars[stock_name][p_idx].X > 0.01: #si le pattern est utilisé dans la solution(seuil pour éviter les valeurs très petites)
+                        pattern = all_patterns[stock_name][p_idx] #récupération du pattern
+                        pattern_desc = [] #description du pattern pour l'affichage
+                        for piece_idx, count in pattern.items(): #pour chaque type de pièce dans le pattern
+                            pattern_desc.append(f"{count}×{demands[piece_idx][2]}") #ajout de la description (ex: "2×T1")
                         used_patterns.append({
                             "stock": stock_name,
                             "count": x_vars[stock_name][p_idx].X,
                             "pattern": ", ".join(pattern_desc)
-                        })
-                        stock_total += x_vars[stock_name][p_idx].X
-                stock_used[stock_name] = stock_total
+                        }) #ajout du pattern utilisé à la liste
+                        stock_total += x_vars[stock_name][p_idx].X #mise à jour de la quantité totale utilisée de ce stock
+                stock_used[stock_name] = stock_total #stockage de la quantité totale utilisée de ce stock
             return {"cost": model.ObjVal, "patterns": used_patterns, "stock_used": stock_used, "num_patterns": num_patterns}
         else:
             return {"cost": None, "patterns": [], "stock_used": {}, "infeasible": True}
@@ -270,11 +270,11 @@ class CuttingStockApp(QWidget):
         # KERF
         l2 = QLabel("Trait de scie (Kerf mm):")
         self.kerf_spin = QDoubleSpinBox()
-        self.kerf_spin.setRange(0, 100)
+        self.kerf_spin.setRange(0, 50)
         self.kerf_spin.setDecimals(2)
         self.kerf_spin.setSingleStep(0.1)
         self.kerf_spin.setValue(5.0)
-        self.kerf_spin.setFixedWidth(60)
+        self.kerf_spin.setFixedWidth(80)
 
         # TYPES 100
         l3 = QLabel("Types Ø100mm:")
@@ -535,7 +535,7 @@ class CuttingStockApp(QWidget):
                     length = float(l_item.text())
                     cost = float(c_item.text())
                     avail = float(a_item.text())
-                    
+                    #gestion des erreurs (valeur negative)
                     if length <= 0: raise ValueError(f"Stock {chr(65+i)} : La longueur doit être > 0")
                     if cost < 0: raise ValueError(f"Stock {chr(65+i)} : Le coût ne peut pas être négatif")
                     if avail < 0: raise ValueError(f"Stock {chr(65+i)} : La disponibilité ne peut pas être négative")

@@ -10,20 +10,21 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QProgressBar, QFormLayout, QLineEdit, QGroupBox, 
                              QFileDialog, QTabWidget, QTextEdit, QRadioButton, QFrame, QSplitter)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QAction
 
 import matplotlib
 matplotlib.use('QtAgg')
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 import matplotlib.image as mpimg 
 
 import gurobipy as gp
 from gurobipy import GRB
 
 # =============================================================================
-# WORKER (Logique Mathématique - Version Continuous)
+# WORKER (Mathematical Logic - Unchanged)
 # =============================================================================
 class SolverWorker(QThread):
     finished = pyqtSignal(dict)
@@ -48,10 +49,8 @@ class SolverWorker(QThread):
             
             num_sites = len(sites); num_dist = len(districts); num_techs = len(techs)
 
-            # --- CHECK GEOGRAPHIQUE ---
-            max_range = max(t['range'] for t in techs) if techs else 0
-            
-            # Matrice a_ijk
+            # --- GEOGRAPHIC CHECK ---
+            self.log_signal.emit("Vérification des distances...")
             a = {} 
             possible_connections = 0
             
@@ -70,42 +69,35 @@ class SolverWorker(QThread):
                 self.error.emit("ERREUR GÉOGRAPHIQUE : Aucun client n'est à portée des sites.\n- Vérifiez l'échelle (km).\n- Vérifiez que vos sites ne sont pas à 0,0 et vos clients à 1000,1000.")
                 return
 
-            self.log_signal.emit(f"Connexions physiques possibles : {possible_connections}")
+            self.log_signal.emit(f"Connexions possibles : {possible_connections}")
 
             # --- GUROBI MODEL ---
             m = gp.Model("MCLP_5G_Continuous")
             m.setParam('OutputFlag', 0) 
             
-            # Variables
-            # Y reste BINAIRE (On construit ou on construit pas)
             y = m.addVars(num_sites, num_techs, vtype=GRB.BINARY, name="y")
-            
-            # X devient CONTINU (0.0 à 1.0) -> Permet de servir une partie d'un quartier
             x = m.addVars(num_dist, num_sites, vtype=GRB.CONTINUOUS, lb=0.0, ub=1.0, name="x")
 
-            # Objectif : Max Demande * Pourcentage Couvert
             obj = gp.quicksum(districts[i]['demand'] * x[i,j] for i in range(num_dist) for j in range(num_sites))
             m.setObjective(obj, GRB.MAXIMIZE)
 
-            # Contraintes
             # 1. Budget
             m.addConstr(gp.quicksum(techs[k]['cost'] * y[j,k] for j in range(num_sites) for k in range(num_techs)) <= budget, "Budget")
             
-            # 2. Exclusivité (1 type par site)
+            # 2. Exclusivity
             for j in range(num_sites):
                 m.addConstr(gp.quicksum(y[j,k] for k in range(num_techs)) <= 1, f"Excl_{j}")
 
-            # 3. Portée Physique (Si pas d'antenne ou trop loin, x=0)
+            # 3. Coverage
             for i in range(num_dist):
                 for j in range(num_sites):
-                    # x_ij <= somme(a_ijk * y_jk)
                     m.addConstr(x[i,j] <= gp.quicksum(a.get((i,j,k), 0) * y[j,k] for k in range(num_techs)))
 
-            # 4. Unicité (La somme des % couverts ne dépasse pas 100%)
+            # 4. Unicity
             for i in range(num_dist):
                 m.addConstr(gp.quicksum(x[i,j] for j in range(num_sites)) <= 1.0)
 
-            # 5. Capacité (La somme des gens connectés <= Capacité antenne)
+            # 5. Capacity
             for j in range(num_sites):
                 m.addConstr(
                     gp.quicksum(districts[i]['demand'] * x[i,j] for i in range(num_dist)) <= 
@@ -139,7 +131,6 @@ class SolverWorker(QThread):
                         if y[j,k].X > 0.5: active_tech = k; break
                     
                     if active_tech is not None:
-                        # Charge réelle (somme des parts de quartiers)
                         load = sum(districts[i]['demand'] * x[i,j].X for i in range(num_dist))
                         t = techs[active_tech]
                         res['installations'].append({
@@ -151,9 +142,8 @@ class SolverWorker(QThread):
 
                 for i in range(num_dist):
                     for j in range(num_sites):
-                        # On affiche le lien si le quartier est couvert à plus de 1%
                         if x[i,j].X > 0.01: 
-                            res['links'].append((i, j, x[i,j].X)) # On stocke aussi le %
+                            res['links'].append((i, j, x[i,j].X))
                 
                 self.finished.emit(res)
             elif m.Status == GRB.INFEASIBLE:
@@ -180,7 +170,7 @@ class MplCanvas(FigureCanvasQTAgg):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("5G Master Planner v7.0 (Continuous Fix)")
+        self.setWindowTitle("5G Master Planner v8.0 (Editable & Legend)")
         self.setGeometry(50, 50, 1600, 900)
         
         self.current_mode = "random" 
@@ -236,7 +226,7 @@ class MainWindow(QMainWindow):
         form.addRow("Taille (km):", self.inp_size)
         form.addRow("Budget (€):", self.inp_budget)
         
-        btn_refresh = QPushButton("🔄 Actualiser")
+        btn_refresh = QPushButton("🔄 Actualiser & Générer")
         btn_refresh.setStyleSheet("background-color: #3498db; color: white; padding: 5px;")
         btn_refresh.clicked.connect(self.refresh_data)
         form.addRow(btn_refresh)
@@ -257,7 +247,7 @@ class MainWindow(QMainWindow):
         side_layout.addStretch()
 
         # Actions
-        self.btn_solve = QPushButton("LANCER")
+        self.btn_solve = QPushButton("LANCER OPTIMISATION")
         self.btn_solve.setFixedHeight(50)
         self.btn_solve.setStyleSheet("background-color: #27ae60; font-weight: bold; font-size: 14px;")
         self.btn_solve.clicked.connect(self.start_optimization)
@@ -281,17 +271,17 @@ class MainWindow(QMainWindow):
         # --- CENTER ---
         self.tabs = QTabWidget()
         
-        # Tab 1: Données (CORRIGÉ: Utilisation de QSplitter pour être sûr que tout s'affiche)
+        # Tab 1: Données
         tab_data = QWidget(); v_data = QVBoxLayout(tab_data)
-        
         splitter_tables = QSplitter(Qt.Orientation.Horizontal)
+        
         self.tbl_sites = self.create_table(["ID", "X", "Y"])
         self.tbl_dist = self.create_table(["ID", "X", "Y", "Demande"])
         self.tbl_techs = self.create_table(["Type", "Coût", "Cap", "Rayon"])
         
-        splitter_tables.addWidget(self.create_group("Sites", self.tbl_sites))
-        splitter_tables.addWidget(self.create_group("Demandes", self.tbl_dist))
-        splitter_tables.addWidget(self.create_group("Technologies", self.tbl_techs))
+        splitter_tables.addWidget(self.create_group("Sites (Editable)", self.tbl_sites))
+        splitter_tables.addWidget(self.create_group("Demandes (Editable)", self.tbl_dist))
+        splitter_tables.addWidget(self.create_group("Technologies (Editable)", self.tbl_techs))
         
         v_data.addWidget(splitter_tables)
         self.tabs.addTab(tab_data, "1. Données")
@@ -312,6 +302,13 @@ class MainWindow(QMainWindow):
 
         # Tab 3: Résultats
         tab_res = QWidget(); v_res = QVBoxLayout(tab_res)
+        
+        # Bouton Export
+        self.btn_export = QPushButton("💾 Exporter Résultats (CSV)")
+        self.btn_export.clicked.connect(self.export_results_csv)
+        self.btn_export.setStyleSheet("background-color: #3498db; color: white; padding: 5px;")
+        v_res.addWidget(self.btn_export)
+
         self.tbl_res = self.create_table(["Site", "Loc", "Tech", "Charge", "Coût", "Rayon"])
         self.tbl_res.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         v_res.addWidget(QLabel("Résultats Optimisés :"))
@@ -332,6 +329,7 @@ class MainWindow(QMainWindow):
         self.log_box.append(f"> {m}"); sb = self.log_box.verticalScrollBar(); sb.setValue(sb.maximum())
 
     def update_tables(self):
+        # Cette fonction met à jour l'affichage, mais l'utilisateur peut ensuite modifier les cases
         self.tbl_sites.setRowCount(len(self.sites))
         for r, s in enumerate(self.sites):
             self.tbl_sites.setItem(r,0,QTableWidgetItem(str(s['id']))); self.tbl_sites.setItem(r,1,QTableWidgetItem(f"{s['x']:.0f}")); self.tbl_sites.setItem(r,2,QTableWidgetItem(f"{s['y']:.0f}"))
@@ -340,29 +338,89 @@ class MainWindow(QMainWindow):
             self.tbl_dist.setItem(r,0,QTableWidgetItem(str(d['id']))); self.tbl_dist.setItem(r,1,QTableWidgetItem(f"{d['x']:.0f}")); self.tbl_dist.setItem(r,2,QTableWidgetItem(f"{d['y']:.0f}")); self.tbl_dist.setItem(r,3,QTableWidgetItem(str(d['demand'])))
         self.tbl_techs.setRowCount(len(self.techs))
         for r, t in enumerate(self.techs):
-            self.tbl_techs.setItem(r,0,QTableWidgetItem(t['name'])); self.tbl_techs.setItem(r,1,QTableWidgetItem(f"{t['cost']}€")); self.tbl_techs.setItem(r,2,QTableWidgetItem(str(t['cap']))); self.tbl_techs.setItem(r,3,QTableWidgetItem(f"{t['range']}km"))
+            self.tbl_techs.setItem(r,0,QTableWidgetItem(t['name'])); self.tbl_techs.setItem(r,1,QTableWidgetItem(str(t['cost']))); self.tbl_techs.setItem(r,2,QTableWidgetItem(str(t['cap']))); self.tbl_techs.setItem(r,3,QTableWidgetItem(str(t['range'])))
 
-    # --- VALIDATION ---
-    def validate_inputs(self):
+    # --- NEW: READ TABLES (Direct Edit) ---
+    def read_data_from_tables(self):
+        """Re-lit les données depuis les tableaux (permet l'édition manuelle)"""
         try:
-            # Vérification champs vides ou texte
-            if not self.inp_nb_sites.text() or not self.inp_nb_dist.text(): raise ValueError("Champ vide")
-            ns = int(self.inp_nb_sites.text())
-            nd = int(self.inp_nb_dist.text())
-            sz = float(self.inp_size.text())
-            bg = float(self.inp_budget.text())
+            # 1. Sites
+            new_sites = []
+            for r in range(self.tbl_sites.rowCount()):
+                new_sites.append({
+                    'id': self.tbl_sites.item(r,0).text(),
+                    'x': float(self.tbl_sites.item(r,1).text()),
+                    'y': float(self.tbl_sites.item(r,2).text())
+                })
             
-            if ns <= 0 or nd <= 0 or sz <= 0: raise ValueError("Zéro ou négatif interdit")
-            if bg < 0: raise ValueError("Budget négatif")
-            return ns, nd, sz, bg
+            # 2. Districts
+            new_dist = []
+            for r in range(self.tbl_dist.rowCount()):
+                new_dist.append({
+                    'id': self.tbl_dist.item(r,0).text(),
+                    'x': float(self.tbl_dist.item(r,1).text()),
+                    'y': float(self.tbl_dist.item(r,2).text()),
+                    'demand': float(self.tbl_dist.item(r,3).text())
+                })
+            
+            # 3. Techs
+            new_techs = []
+            for r in range(self.tbl_techs.rowCount()):
+                cost_txt = self.tbl_techs.item(r,1).text().replace('€', '')
+                range_txt = self.tbl_techs.item(r,3).text().replace('km', '')
+                new_techs.append({
+                    'name': self.tbl_techs.item(r,0).text(),
+                    'cost': float(cost_txt),
+                    'cap': float(self.tbl_techs.item(r,2).text()),
+                    'range': float(range_txt)
+                })
+            
+            # Mise à jour des données internes
+            self.sites = new_sites
+            self.districts = new_dist
+            self.techs = new_techs
+            self.log("Données mises à jour depuis les tableaux.")
+            return True
+
         except ValueError as e:
-            QMessageBox.critical(self, "Erreur de Saisie", f"Valeur invalide détectée.\nAssurez-vous d'entrer des nombres positifs.\n\nDétail: {e}")
-            return None
+            QMessageBox.critical(self, "Erreur de Table", f"Une valeur dans les tableaux est invalide (texte au lieu de chiffre ?).\n\nErreur: {e}")
+            return False
+
+    # --- UPDATED: VALIDATION (Aggregated Errors) ---
+    def check_inputs_errors(self):
+        errors = []
+        
+        # Check Params
+        try:
+            ns = int(self.inp_nb_sites.text())
+            if ns <= 0: errors.append("- Nb Sites doit être > 0")
+        except: errors.append("- Nb Sites invalide")
+
+        try:
+            nd = int(self.inp_nb_dist.text())
+            if nd <= 0: errors.append("- Nb Demandes doit être > 0")
+        except: errors.append("- Nb Demandes invalide")
+
+        try:
+            sz = float(self.inp_size.text())
+            if sz <= 0: errors.append("- Taille (km) doit être > 0")
+        except: errors.append("- Taille invalide")
+
+        try:
+            bg = float(self.inp_budget.text())
+            if bg < 0: errors.append("- Budget ne peut pas être négatif")
+        except: errors.append("- Budget invalide")
+
+        if errors:
+            msg = "Veuillez corriger les erreurs suivantes :\n\n" + "\n".join(errors)
+            QMessageBox.warning(self, "Saisie Incorrecte", msg)
+            return False, None
+        
+        return True, (ns, nd, sz, bg)
 
     def refresh_data(self):
-        self.log("Actualisation...")
-        vals = self.validate_inputs()
-        if not vals: return 
+        ok, vals = self.check_inputs_errors()
+        if not ok: return 
 
         if self.current_mode == "random": self.generate_random_data()
         elif self.current_mode == "grid": self.generate_grid_data()
@@ -370,8 +428,8 @@ class MainWindow(QMainWindow):
 
     def generate_random_data(self):
         self.current_mode = "random"
-        vals = self.validate_inputs()
-        if not vals: return
+        ok, vals = self.check_inputs_errors()
+        if not ok: return
         n_s, n_d, sz, _ = vals
 
         self.sites = [{'id':f"S{i}", 'x':random.uniform(0,sz), 'y':random.uniform(0,sz)} for i in range(n_s)]
@@ -381,8 +439,8 @@ class MainWindow(QMainWindow):
 
     def generate_grid_data(self):
         self.current_mode = "grid"
-        vals = self.validate_inputs()
-        if not vals: return
+        ok, vals = self.check_inputs_errors()
+        if not ok: return
         _, n_d, sz, _ = vals
         
         self.sites = []
@@ -433,12 +491,13 @@ class MainWindow(QMainWindow):
         try: max_size = float(self.inp_size.text())
         except: max_size = 200
 
+        # Background
         if is_satellite:
             img_path = None
             for ext in ["jpg", "jpeg", "png"]:
-                if os.path.exists(f"islem/paris.{ext}"): 
-                    img_path = f"islem/paris.{ext}"
-                    break
+                if os.path.exists(f"islem/paris.{ext}"): img_path = f"islem/paris.{ext}"; break
+                if os.path.exists(f"paris.{ext}"): img_path = f"paris.{ext}"; break
+            
             if img_path:
                 try:
                     img = mpimg.imread(img_path)
@@ -449,12 +508,13 @@ class MainWindow(QMainWindow):
         else:
             self.canvas.axes.set_facecolor('white'); txt_c = 'black'; dem_uc = 'red'; dem_c = 'green'; site_ac = 'blue'; link_c = 'green'
 
+        # Drawing
         dx = [d['x'] for d in self.districts]; dy = [d['y'] for d in self.districts]
         ds = [d['demand']/10 + 15 for d in self.districts]
         cols = [dem_uc] * len(self.districts)
 
         if res:
-             covered = {i for i,j, pct in res['links']} # res['links'] contient mnt le pourcentage
+             covered = {i for i,j, pct in res['links']}
              for idx in covered: cols[idx] = dem_c
              
              for inst in res['installations']:
@@ -465,33 +525,42 @@ class MainWindow(QMainWindow):
 
              for i, j, pct in res['links']:
                  d = self.districts[i]; s = self.sites[j]
-                 # Transparence selon le pourcentage de couverture
                  alpha_line = max(0.2, pct * 0.8)
                  self.canvas.axes.plot([d['x'], s['x']], [d['y'], s['y']], color=link_c, lw=0.5, alpha=alpha_line)
 
-        self.canvas.axes.scatter(dx, dy, s=ds, c=cols, edgecolors=txt_c, linewidth=0.5, label='Clients', zorder=2)
+        self.canvas.axes.scatter(dx, dy, s=ds, c=cols, edgecolors=txt_c, linewidth=0.5, label='_nolegend_', zorder=2)
         
         active_ids = {i['site_id'] for i in res['installations']} if res else set()
         sx = [s['x'] for s in self.sites if s['id'] not in active_ids]
         sy = [s['y'] for s in self.sites if s['id'] not in active_ids]
-        self.canvas.axes.scatter(sx, sy, c='gray', marker='s', s=40, alpha=0.6, label='Candidats', zorder=1)
+        self.canvas.axes.scatter(sx, sy, c='black', marker='s', s=40, alpha=0.6, label='_nolegend_', zorder=1)
 
         if res:
             ax = [i['x'] for i in res['installations']]; ay = [i['y'] for i in res['installations']]
-            self.canvas.axes.scatter(ax, ay, c=site_ac, marker='^', s=130, edgecolors='white', linewidth=1, label='Actifs', zorder=3)
+            self.canvas.axes.scatter(ax, ay, c=site_ac, marker='^', s=130, edgecolors='white', linewidth=1, label='_nolegend_', zorder=3)
 
         self.canvas.axes.set_xlim(0, max_size); self.canvas.axes.set_ylim(0, max_size)
-        self.canvas.axes.grid(True, linestyle=':', alpha=0.5); self.canvas.draw()
+        self.canvas.axes.grid(True, linestyle=':', alpha=0.5)
+        
+        # --- MAP KEY (LEGEND) ---
+        handles = []
+        handles.append(mlines.Line2D([], [], color='black', marker='s', linestyle='None', markersize=8, label='Site Candidat'))
+        handles.append(mlines.Line2D([], [], color=site_ac, marker='^', linestyle='None', markersize=8, label='Antenne Active'))
+        handles.append(mlines.Line2D([], [], color=dem_uc, marker='o', linestyle='None', markersize=8, label='Demande (Non Couvert)'))
+        handles.append(mlines.Line2D([], [], color=dem_c, marker='o', linestyle='None', markersize=8, label='Demande (Couvert)'))
+        
+        legend = self.canvas.axes.legend(handles=handles, loc='upper right', facecolor='white', framealpha=0.8)
+        self.canvas.draw()
 
     # --- OPTIMISATION ---
     def start_optimization(self):
-        vals = self.validate_inputs()
-        if not vals: return
-        n_s, n_d, sz, bg = vals
+        # 1. Vérification Inputs
+        ok, vals = self.check_inputs_errors()
+        if not ok: return
+        _, _, _, bg = vals
         
-        if n_s * n_d > 100000:
-            reply = QMessageBox.question(self, "Attention", "Calcul lourd. Continuer ?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No: return
+        # 2. Lecture Données Tableaux (Modifications Manuelles)
+        if not self.read_data_from_tables(): return
 
         data = {'sites': self.sites, 'districts': self.districts, 'techs': self.techs, 'budget': bg}
         
@@ -530,6 +599,28 @@ class MainWindow(QMainWindow):
         pct = (res['obj_val']/res['total_demand'])*100
         self.lbl_metrics.setText(f"Couverture: {pct:.1f}% ({int(res['obj_val'])} clients) | Coût: {res['budget_used']}€")
         self.plot_map(res)
+
+    def export_results_csv(self):
+        if not hasattr(self, 'last_res') or not self.last_res:
+            QMessageBox.warning(self, "Export Impossible", "Veuillez d'abord lancer une optimisation.")
+            return
+            
+        f, _ = QFileDialog.getSaveFileName(self, "Sauvegarder Résultats", "", "CSV Files (*.csv)")
+        if f:
+            try:
+                with open(f, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(["Site_ID", "X", "Y", "Technologie", "Charge", "Capacite_Max", "Cout", "Rayon"])
+                    for item in self.last_res['installations']:
+                        writer.writerow([
+                            item['site_id'], item['x'], item['y'], 
+                            item['tech_name'], int(item['load']), item['capacity'], 
+                            item['cost'], item['range']
+                        ])
+                self.log(f"Résultats exportés vers : {f}")
+                QMessageBox.information(self, "Succès", "Fichier CSV généré avec succès.")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur Export", str(e))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -515,6 +515,9 @@ class OptiRouteWindow(QMainWindow):
 
         M = time_limit + 1000
         for i in range(N):
+            # FIX: Ensure service finishes before closing, else y[i] must be 0
+            model.addConstr(t[i] + serv[i] <= tw_l[i] + M * (1 - y[i])) 
+            
             for j in range(1, N):
                 if i!=j:
                     model.addConstr(t[j] >= t[i] + serv[i] + dist[i,j] - M*(1-x[i,j]))

@@ -148,7 +148,7 @@ class OptiRouteWindow(QMainWindow):
         self.edit_max_shift = QLineEdit("480")
         self.edit_max_shift.setPlaceholderText("Minutes")
         
-        pg_layout.addRow("Nombre de Clients :", self.spin_n)
+        pg_layout.addRow("Nombre de Machines :", self.spin_n)
         pg_layout.addRow("Durée Max en minutes :", self.edit_max_shift)
         param_group.setLayout(pg_layout)
         left_layout.addWidget(param_group)
@@ -287,9 +287,9 @@ class OptiRouteWindow(QMainWindow):
 
     # --- LOGIQUE TABLEAUX ---
     def create_tables(self):
-        n_clients = self.spin_n.value()
-        N = n_clients + 1 
-        headers = [f"Dépôt" if i==0 else f"Client {i}" for i in range(N)]
+        n_Machines = self.spin_n.value()
+        N = n_Machines + 1 
+        headers = [f"Dépôt" if i==0 else f"Machine {i}" for i in range(N)]
 
         self.dist_table.setRowCount(N); self.dist_table.setColumnCount(N)
         self.dist_table.setHorizontalHeaderLabels(headers); self.dist_table.setVerticalHeaderLabels(headers)
@@ -348,7 +348,7 @@ class OptiRouteWindow(QMainWindow):
         try:
             N, dist, service, tw_e, tw_l, max_shift = self.read_inputs() 
             return {
-                "n_clients": self.spin_n.value(),
+                "n_Machines": self.spin_n.value(),
                 "max_shift": self.edit_max_shift.text(),
                 "dist": dist.tolist(),
                 "service": service.tolist(),
@@ -379,10 +379,10 @@ class OptiRouteWindow(QMainWindow):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                self.spin_n.setValue(data["n_clients"])
+                self.spin_n.setValue(data["n_Machines"])
                 self.edit_max_shift.setText(data["max_shift"])
                 self.create_tables() 
-                N = data["n_clients"] + 1
+                N = data["n_Machines"] + 1
                 dist = data["dist"]
                 service = data["service"]
                 tw_e = data["tw_e"]
@@ -411,7 +411,7 @@ class OptiRouteWindow(QMainWindow):
                     writer = csv.writer(f, delimiter=';') 
                     writer.writerow(["Type", "Noeud", "Arrivee en minutes", "Service en minutes", "Depart en minutes"])
                     for step in self.last_schedule_data:
-                        node_name = f"Client {step['n']}" if step['n'] > 0 else "Dépôt"
+                        node_name = f"Machine {step['n']}" if step['n'] > 0 else "Dépôt"
                         writer.writerow([
                             step['t'], node_name, 
                             f"{step['a']:.2f}".replace('.', ','), 
@@ -438,7 +438,7 @@ class OptiRouteWindow(QMainWindow):
         except: return 0.0, False, f"Valeur invalide '{item.text()}'"
 
     def read_inputs(self):
-        n_clients = self.spin_n.value(); N = n_clients + 1
+        n_Machines = self.spin_n.value(); N = n_Machines + 1
         errors = []
         try:
             max_shift = float(self.edit_max_shift.text().replace(',', '.'))
@@ -575,10 +575,10 @@ class OptiRouteWindow(QMainWindow):
 
         if len(missed) > 0:
             self.kpi_stat.set_value("Partiel")
-            self.status.showMessage(f"Terminé. {len(missed)} clients non livrés.")
+            self.status.showMessage(f"Terminé. {len(missed)} Machines non livrés.")
         else:
             self.kpi_stat.set_value("Optimal")
-            self.status.showMessage("Succès. Tous les clients livrés.")
+            self.status.showMessage("Succès. Tous les Machines livrés.")
 
         self.display_smart_visuals(x_re, t_re, t_end_re, visited, missed, N, service, dist, tw_e, is_theo_feasible, depot_close)
 
@@ -612,7 +612,7 @@ class OptiRouteWindow(QMainWindow):
             arr = cur_t + tr
             s_start = max(arr, tw_e[n])
             s_end = s_start + service[n]
-            self.last_schedule_data.append({"n":n, "t":"Client Livré", "a":arr, "s":service[n], "d":s_end})
+            self.last_schedule_data.append({"n":n, "t":"Machine Livré", "a":arr, "s":service[n], "d":s_end})
             cur_t = s_end
             prev = n
             
@@ -628,19 +628,19 @@ class OptiRouteWindow(QMainWindow):
         
         if missed:
             html += f"<div style='background-color:#fdedec; border:1px solid {C_DANGER}; padding:10px; border-radius:4px;'>"
-            html += f"<b style='color:{C_DANGER}'>⚠️ MISSION PARTIELLE : {len(missed)} client(s) annulé(s).</b><br>"
+            html += f"<b style='color:{C_DANGER}'>⚠️ MISSION PARTIELLE : {len(missed)} Machine(s) annulé(s).</b><br>"
             html += f"Le camion est rentré à <b>{arr:.1f} min</b> (Fermeture : {depot_close} min).<br>"
             if is_theo_feasible:
                 html += "<i>Une tournée complète était théoriquement possible si le dépôt restait ouvert plus longtemps.</i>"
             else:
                 html += "<i>Même sans fermeture du dépôt, la durée max était insuffisante pour tout livrer.</i>"
             html += "</div><br>"
-            html += f"<b style='color:{C_DANGER}'>Clients non livrés :</b><ul>"
-            for m in missed: html += f"<li>Client {m}</li>"
+            html += f"<b style='color:{C_DANGER}'>Machines non livrés :</b><ul>"
+            for m in missed: html += f"<li>Machine {m}</li>"
             html += "</ul>"
         else:
             html += f"<div style='background-color:#eafaf1; border:1px solid {C_SUCCESS}; padding:10px; border-radius:4px;'>"
-            html += f"<b style='color:{C_SUCCESS}'>✅ MISSION RÉUSSIE : Tous les clients sont livrés.</b>"
+            html += f"<b style='color:{C_SUCCESS}'>✅ MISSION RÉUSSIE : Tous les Machines sont livrés.</b>"
             html += "</div><br>"
 
         html += "<table width='100%' border='1' cellspacing='0' cellpadding='5' style='border-collapse:collapse; border-color:#ddd;'>"
@@ -649,7 +649,7 @@ class OptiRouteWindow(QMainWindow):
             if s['t'] == "Départ Dépôt": color = "#27ae60"
             elif s['t'] == "Retour Dépôt": color = "#c0392b"
             else: color = "#2c3e50"
-            nm = "HUB" if s['n']==0 else f"Client {s['n']}"
+            nm = "HUB" if s['n']==0 else f"Machine {s['n']}"
             html += f"<tr style='color:{color}'><td><b>{s['t']}</b></td><td>{nm}</td><td>{s['a']:.1f}</td><td>{s['d']:.1f}</td></tr>"
         html += "</table>"
         self.results_text.setHtml(html)

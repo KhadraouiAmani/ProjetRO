@@ -170,7 +170,7 @@ class MplCanvas(FigureCanvasQTAgg):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("5G Master Planner v8.0 (Editable & Legend)")
+        self.setWindowTitle("5G Master Planner")
         self.setGeometry(50, 50, 1600, 900)
         
         self.current_mode = "random" 

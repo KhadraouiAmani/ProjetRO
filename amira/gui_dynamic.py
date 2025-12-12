@@ -4,26 +4,41 @@ import time
 import math
 import numpy as np
 
-# PyQt5 Imports
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+# --- 1. MIGRATION PYQT6 (Pour compatibilité Hub) ---
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QTextEdit, QSpinBox,
                              QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-                             QMessageBox, QSplitter, QTabWidget, QAbstractItemView, QDoubleSpinBox)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QColor, QFont
+                             QMessageBox, QSplitter, QTabWidget, QAbstractItemView, QDoubleSpinBox,
+                             QMainWindow) # Ajout de QMainWindow
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
 
-# Matplotlib
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+# --- 2. MATPLOTLIB COMPATIBLE PYQT6 ---
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+except ImportError:
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# Modules
+# --- 3. GESTION DES IMPORTS (Pour éviter les crashs si fichiers manquants) ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+ERROR_MSG = None
 try:
     from build_A_dynamic import read_coords_csv, build_matrices
     from solver_dynamic import solve_dynamic_expected
     from simulator import Simulator
     from map_utils import create_map
-except ImportError:
-    pass
+except ImportError as err:
+    ERROR_MSG = str(err)
+    # Fonctions "bouchons" pour que l'interface s'ouvre quand même
+    def read_coords_csv(*args): raise ImportError(ERROR_MSG)
+    def build_matrices(*args): raise ImportError(ERROR_MSG)
+    def solve_dynamic_expected(*args): raise ImportError(ERROR_MSG)
+    def Simulator(*args): raise ImportError(ERROR_MSG)
+    def create_map(*args): raise ImportError(ERROR_MSG)
 
 # Stylesheet (inchangé)
 STYLE = """
@@ -43,6 +58,7 @@ QTextEdit { border: 1px solid #bdc3c7; border-radius: 6px; background: white; fo
 """
 
 class MplCanvas(FigureCanvas):
+    # CORRECTION TYPO: __init__ (double underscore)
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.ax = self.fig.add_subplot(111)
@@ -56,6 +72,7 @@ class SimThread(QThread):
     progress_signal = pyqtSignal(int, int)     
     finished_signal = pyqtSignal(list)         
 
+    # CORRECTION TYPO: __init__ (double underscore)
     def __init__(self, sim, rate_lambda, horizon):
         super().__init__()
         self.sim = sim
@@ -65,36 +82,44 @@ class SimThread(QThread):
         self._pause = False
 
     def run(self):
-        self.sim.generate_arrival(self.rate_lambda, self.horizon)
-        events = list(self.sim.event_q)
-        events.sort(key=lambda e: e[0])
-        total = len(events)
-        self.sim.event_q = events
-        processed = 0
-        while self.sim.event_q and not self._stop:
-            while self._pause and not self._stop: time.sleep(0.05)
-            time_event, func, args = self.sim.event_q.pop(0)
-            self.sim.clock = time_event
-            try: func(*args)
-            except Exception as e: self.mission_signal.emit({'type': 'error', 'msg': str(e)})
-            if self.sim.missions_log: self.mission_signal.emit(self.sim.missions_log[-1])
-            processed += 1
-            self.progress_signal.emit(processed, total)
-            time.sleep(0.015) 
-        self.finished_signal.emit(self.sim.missions_log)
+        try:
+            self.sim.generate_arrival(self.rate_lambda, self.horizon)
+            events = list(self.sim.event_q)
+            events.sort(key=lambda e: e[0])
+            total = len(events)
+            self.sim.event_q = events
+            processed = 0
+            while self.sim.event_q and not self._stop:
+                while self._pause and not self._stop: time.sleep(0.05)
+                time_event, func, args = self.sim.event_q.pop(0)
+                self.sim.clock = time_event
+                try: func(*args)
+                except Exception as e: self.mission_signal.emit({'type': 'error', 'msg': str(e)})
+                if self.sim.missions_log: self.mission_signal.emit(self.sim.missions_log[-1])
+                processed += 1
+                self.progress_signal.emit(processed, total)
+                time.sleep(0.015) 
+            self.finished_signal.emit(self.sim.missions_log)
+        except Exception as e:
+            print(f"Erreur thread: {e}")
 
     def stop(self): self._stop = True
     def pause(self): self._pause = True
     def resume(self): self._pause = False
 
-class MainWindow(QWidget):
+# CORRECTION STRUCTURE: Héritage QMainWindow pour le Hub
+class MainWindow(QMainWindow): 
+    # CORRECTION TYPO: __init__ (double underscore)
     def __init__(self):
         super().__init__()
         self.setWindowTitle('EMS Optimizer Pro - Gestion Budgétaire')
         self.resize(1400, 850)
         self.setStyleSheet(STYLE)
         
-        main_layout = QVBoxLayout()
+        # --- STRUCTURE QMAINWINDOW (Widget Central) ---
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
         
         # 1. Top Bar
         top_layout = QHBoxLayout()
@@ -116,7 +141,7 @@ class MainWindow(QWidget):
         self.spin_tmax = QSpinBox(); self.spin_tmax.setRange(1,240); self.spin_tmax.setValue(15)
         self.spin_lambda = QSpinBox(); self.spin_lambda.setRange(1,5000); self.spin_lambda.setValue(100)
         
-        # Budget (NOUVEAU)
+        # Budget
         self.spin_budget = QDoubleSpinBox(); self.spin_budget.setRange(0, 100000000); self.spin_budget.setValue(1000000)
         self.spin_cost = QDoubleSpinBox(); self.spin_cost.setRange(0, 1000000); self.spin_cost.setValue(150000)
         
@@ -130,8 +155,8 @@ class MainWindow(QWidget):
 
         # 3. Actions
         action_layout = QHBoxLayout()
-        self.btn_build = QPushButton('⚙️ 3. Construire Matrice')
-        self.btn_solve = QPushButton('🚀 4. Optimiser (avec Budget)')
+        self.btn_build = QPushButton('⚙ 3. Construire Matrice')
+        self.btn_solve = QPushButton('🚀 4. Optimiser (Couverture Stricte)')
         self.btn_start = QPushButton('▶ 5. Simulation')
         self.btn_start.setObjectName("success")
         self.btn_pause = QPushButton('⏸ Pause')
@@ -143,17 +168,21 @@ class MainWindow(QWidget):
         main_layout.addLayout(action_layout)
 
         # 4. Central Splitter
-        splitter = QSplitter(Qt.Horizontal)
+        # CORRECTION PYQT6: Qt.Orientation.Horizontal
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         
         left_widget = QWidget(); left_layout = QVBoxLayout(left_widget)
         self.tabs = QTabWidget()
         
-        self.table_matrix = QTableWidget(); self.table_matrix.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_matrix = QTableWidget()
+        # CORRECTION PYQT6: Enum EditTrigger
+        self.table_matrix.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabs.addTab(self.table_matrix, "📐 Matrice A")
         
         self.table_hops = QTableWidget(0, 3)
         self.table_hops.setHorizontalHeaderLabels(['Hôpital', 'Ambulances', 'Dispo Live'])
-        self.table_hops.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # CORRECTION PYQT6: Enum ResizeMode
+        self.table_hops.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tabs.addTab(self.table_hops, "🚑 Résultat & Simu")
         
         left_layout.addWidget(self.tabs)
@@ -168,7 +197,8 @@ class MainWindow(QWidget):
         splitter.addWidget(right_widget)
         splitter.setSizes([600, 800])
         main_layout.addWidget(splitter)
-        self.setLayout(main_layout)
+        
+        # NOTE: self.setLayout supprimé car le layout est sur central_widget
 
         self.addrs = []; self.hops = []; self.A = None; self.x_sol = None
         self.sim = None; self.sim_thread = None; self.mapfile = None; self.active_lines = {}
@@ -183,12 +213,22 @@ class MainWindow(QWidget):
         self.btn_export_map.clicked.connect(self.open_map)
 
     def load_addrs(self):
-        p, _ = QFileDialog.getOpenFileName(self, 'Adresses', '', 'CSV (*.csv)')
-        if p: self.addrs = read_coords_csv(p); self.log.append(f'📍 Adresses: {len(self.addrs)}'); self.plot_static_map()
+        try:
+            p, _ = QFileDialog.getOpenFileName(self, 'Adresses', '', 'CSV (*.csv)')
+            if p: self.addrs = read_coords_csv(p); self.log.append(f'📍 Adresses: {len(self.addrs)}'); self.plot_static_map()
+        except ImportError:
+            QMessageBox.critical(self, "Erreur", f"Librairie manquante : {ERROR_MSG}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", str(e))
 
     def load_hops(self):
-        p, _ = QFileDialog.getOpenFileName(self, 'Hôpitaux', '', 'CSV (*.csv)')
-        if p: self.hops = read_coords_csv(p); self.log.append(f'🏥 Hôpitaux: {len(self.hops)}'); self.plot_static_map()
+        try:
+            p, _ = QFileDialog.getOpenFileName(self, 'Hôpitaux', '', 'CSV (*.csv)')
+            if p: self.hops = read_coords_csv(p); self.log.append(f'🏥 Hôpitaux: {len(self.hops)}'); self.plot_static_map()
+        except ImportError:
+            QMessageBox.critical(self, "Erreur", f"Librairie manquante : {ERROR_MSG}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", str(e))
 
     def plot_static_map(self):
         self.canvas.ax.clear(); self.canvas.ax.set_title("Carte Géographique"); self.canvas.ax.grid(True, alpha=0.3)
@@ -214,25 +254,28 @@ class MainWindow(QWidget):
             for i in range(rows):
                 for j in range(cols):
                     val = self.A[i, j]
-                    item = QTableWidgetItem(str(val)); item.setTextAlignment(Qt.AlignCenter)
+                    item = QTableWidgetItem(str(val))
+                    # CORRECTION PYQT6: AlignmentFlag
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if val == 1: item.setBackground(QColor("#2ecc71")); item.setForeground(QColor("white"))
                     else: item.setBackground(QColor("#ecf0f1")); item.setForeground(QColor("#95a5a6"))
                     self.table_matrix.setItem(i, j, item)
             
-            self.table_matrix.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            # CORRECTION PYQT6: ResizeMode
+            self.table_matrix.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
             self.tabs.setCurrentIndex(0)
 
-            # Suggestions
+            # Suggestions (Fonctionnalité que vous vouliez garder)
             unreach = np.where(self.A.sum(axis=1) == 0)[0]
             if len(unreach) > 0:
                 times_un = self.times[unreach]; min_t = np.min(times_un, axis=1); sugg_t = math.ceil(np.max(min_t))
                 dists_un = self.dist[unreach]; min_d = np.min(dists_un, axis=1); worst_d = np.max(min_d)
                 sugg_v = math.ceil(worst_d / (current_tmax/60.0))
                 
-                msg = (f"⚠️ <b>{len(unreach)} adresses inatteignables.</b><br>"
+                msg = (f"⚠ <b>{len(unreach)} adresses inatteignables.</b><br>"
                        f"👉 Tmax suggéré: {sugg_t} min<br>👉 Vitesse suggérée: {sugg_v} km/h")
                 QMessageBox.warning(self, "Alerte", msg)
-                self.log.append(f"⚠️ {len(unreach)} adresses non couvertes.")
+                self.log.append(f"⚠ {len(unreach)} adresses non couvertes.")
                 try:
                     ux = [self.addrs[i][0] for i in unreach]; uy = [self.addrs[i][1] for i in unreach]
                     self.canvas.ax.scatter(ux, uy, c='black', marker='x', s=80, label='INATTEIGNABLE', zorder=10); self.canvas.draw()
@@ -240,7 +283,6 @@ class MainWindow(QWidget):
 
         except Exception as e: QMessageBox.critical(self, "Erreur", str(e))
 
-    # --- FONCTION MODIFIÉE POUR APPELER LE NOUVEAU SOLVEUR ---
     def solve(self):
         if self.A is None: return
         
@@ -249,40 +291,51 @@ class MainWindow(QWidget):
         cost = self.spin_cost.value()
         
         # Log pour l'utilisateur
-        self.log.append(f"⏳ Optimisation... Budget={budget:,.0f}, Coût/U={cost:,.0f}")
+        self.log.append(f"⏳ Optimisation Stricte... Budget={budget:,.0f}, Coût/U={cost:,.0f}")
         
-        p = [0.1] * self.A.shape[1]
-        
-        # Appel avec les nouveaux paramètres
-        self.x_sol, total_ambs = solve_dynamic_expected(
-            self.A, 
-            p, 
-            budget=budget, 
-            cost_per_amb=cost, 
-            min_per_hop=1  # <--- FORCE AU MOINS 1 PAR HÔPITAL
-        )
-        
-        if self.x_sol:
-            cout_total = total_ambs * cost
-            self.log.append(f"✅ Solution trouvée : {total_ambs} ambulances.")
-            self.log.append(f"💰 Coût total : {cout_total:,.0f} (Budget restant : {budget - cout_total:,.0f})")
+        try:
+            p = [0.1] * self.A.shape[1]
             
-            self.table_hops.setRowCount(len(self.hops))
-            for j, count in enumerate(self.x_sol):
-                self.table_hops.setItem(j, 0, QTableWidgetItem(f"Hôpital {j}"))
-                self.table_hops.setItem(j, 1, QTableWidgetItem(str(count)))
-                self.table_hops.setItem(j, 2, QTableWidgetItem(str(count)))
+            # Appel du solveur Strict
+            self.x_sol, total_ambs = solve_dynamic_expected(
+                self.A, 
+                p, 
+                budget=budget, 
+                cost_per_amb=cost, 
+                min_per_hop=1 
+            )
             
-            self.tabs.setCurrentIndex(1)
-            self.mapfile = create_map(self.addrs, self.hops, self.x_sol, mapfile='res_optim.html')
-        else:
-            msg = "❌ <b>Pas de solution possible.</b><br><br>" \
-                  "Causes possibles :<br>" \
-                  "1. Budget insuffisant pour mettre 1 ambulance partout.<br>" \
-                  "2. Budget insuffisant pour couvrir toutes les adresses.<br>" \
-                  "3. Adresses géographiquement inatteignables."
-            QMessageBox.critical(self, "Echec", msg)
-            self.log.append("❌ Echec optimisation (Infeasible).")
+            if self.x_sol:
+                cout_total = total_ambs * cost
+                self.log.append(f"✅ Solution trouvée : {total_ambs} ambulances.")
+                
+                # Vérification de l'équité
+                hopitaux_vides = self.x_sol.count(0)
+                if hopitaux_vides > 0:
+                    self.log.append(f"⚠ Info : {hopitaux_vides} hôpital/aux vide(s) pour économiser le budget et garantir la couverture.")
+                
+                self.log.append(f"💰 Coût total : {cout_total:,.0f} (Reste : {budget - cout_total:,.0f})")
+                
+                self.table_hops.setRowCount(len(self.hops))
+                for j, count in enumerate(self.x_sol):
+                    self.table_hops.setItem(j, 0, QTableWidgetItem(f"Hôpital {j}"))
+                    self.table_hops.setItem(j, 1, QTableWidgetItem(str(count)))
+                    self.table_hops.setItem(j, 2, QTableWidgetItem(str(count)))
+                
+                self.tabs.setCurrentIndex(1)
+                self.mapfile = create_map(self.addrs, self.hops, self.x_sol, mapfile='res_optim.html')
+            else:
+                # CAS ECHEC (Infeasible)
+                msg = "❌ <b>Optimisation Impossible.</b><br><br>" \
+                      "Le budget est insuffisant pour garantir une <b>couverture stricte</b> de toutes les adresses.<br><br>" \
+                      "Solutions :<br>" \
+                      "1. Augmentez le Budget.<br>" \
+                      "2. Augmentez Tmax (pour que les ambulances aillent plus loin).<br>" \
+                      "3. Acceptez de ne pas couvrir certaines zones (nécessite changement de code)."
+                QMessageBox.critical(self, "Echec Critique", msg)
+                self.log.append("❌ Echec : Pas de solution avec ce budget.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur Solveur", str(e))
 
     def start_sim(self):
         if not self.x_sol: return
@@ -329,9 +382,10 @@ class MainWindow(QWidget):
             import webbrowser
             webbrowser.open('file://' + os.path.realpath(self.mapfile))
 
+# CORRECTION TYPO: __name__ et __main__ (double underscore)
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 9))
     win = MainWindow()
     win.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

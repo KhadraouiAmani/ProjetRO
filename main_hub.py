@@ -5,7 +5,7 @@ import inspect
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QFrame, QGridLayout,
                              QGraphicsDropShadowEffect, QTabWidget, QMessageBox, QScrollArea,
-                             QTabBar)  # <--- Ajout de QTabBar ici
+                             QTabBar)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QAction
 
@@ -21,7 +21,7 @@ STYLE_CONFIG = {
     "font_family": "Segoe UI" if os.name == 'nt' else "Helvetica"
 }
 
-# --- 1. La Carte Application (Modifiée pour émettre un signal) ---
+# --- 1. La Carte Application ---
 class AppCard(QFrame):
     # Signal personnalisé : titre de l'app, chemin du fichier
     launch_requested = pyqtSignal(str, str)
@@ -91,7 +91,7 @@ class AppCard(QFrame):
             }}
             QPushButton:hover {{ background-color: {STYLE_CONFIG['accent_hover']}; }}
         """)
-        # Connexion du bouton au signal
+        
         launch_btn.clicked.connect(self.emit_launch)
         
         layout.addLayout(icon_container)
@@ -112,9 +112,9 @@ class AppCard(QFrame):
         self.move(self.x(), self.y() + 2)
         super().leaveEvent(event)
 
-# --- 2. Le Widget d'Accueil (La grille de cartes) ---
+# --- 2. Le Widget d'Accueil ---
 class HomeDashboard(QWidget):
-    request_tab_open = pyqtSignal(str, str) # Signal vers la Main Window
+    request_tab_open = pyqtSignal(str, str)
 
     def __init__(self, base_dir):
         super().__init__()
@@ -122,7 +122,6 @@ class HomeDashboard(QWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        # Utilisation d'un ScrollArea au cas où l'écran est petit
         main_layout = QVBoxLayout(self)
         
         scroll = QScrollArea()
@@ -155,6 +154,7 @@ class HomeDashboard(QWidget):
         grid_layout.setSpacing(30)
         grid_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        # --- LISTE DES APPLICATIONS ---
         apps = [
             {"title": "Allocation Ambulances", "desc": "Optimisation dynamique.", "icon": "🚑", "path": "amira/gui_dynamic.py"},
             {"title": "Vehicle Routing (VRP)", "desc": "Planification de tournées.", "icon": "🚚", "path": "belkis/interface_vrp.py"},
@@ -180,7 +180,7 @@ class HomeDashboard(QWidget):
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll)
 
-# --- 3. La Fenêtre Principale avec Onglets ---
+# --- 3. La Fenêtre Principale ---
 class OptimizationHub(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -190,7 +190,7 @@ class OptimizationHub(QMainWindow):
         
         # Initialisation des onglets
         self.tabs = QTabWidget()
-        self.tabs.setTabsClosable(True) # Permettre de fermer les onglets
+        self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.setStyleSheet(f"""
             QTabWidget::pane {{ border: 1px solid #E0E0E0; background: {STYLE_CONFIG['background']}; }}
@@ -208,75 +208,83 @@ class OptimizationHub(QMainWindow):
                 border-bottom: 2px solid {STYLE_CONFIG['accent']};
             }}
             QTabBar::close-button {{ image: none; }} 
-            /* Note: Style du bouton fermer simplifié pour l'exemple */
         """)
         
         # Onglet Accueil
         self.home = HomeDashboard(self.base_dir)
         self.home.request_tab_open.connect(self.open_module_in_tab)
         
-        # Le premier onglet (Dashboard) n'est pas fermable via l'index, on gère ça dans close_tab
         self.tabs.addTab(self.home, "🏠 Accueil")
         
         # Cacher le bouton fermer sur l'onglet Accueil (Index 0)
-        # Cacher le bouton fermer sur l'onglet Accueil (Index 0)
         self.tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
         self.tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.LeftSide, None)
-        
 
         self.setCentralWidget(self.tabs)
 
     def close_tab(self, index):
-        # On empêche de fermer l'accueil (index 0)
         if index > 0:
             widget = self.tabs.widget(index)
             self.tabs.removeTab(index)
             widget.deleteLater()
 
     def open_module_in_tab(self, title, file_path):
-        # Vérifier si le fichier existe
         if not os.path.exists(file_path):
             QMessageBox.critical(self, "Erreur", f"Fichier introuvable :\n{file_path}")
             return
 
-        # 1. Charger dynamiquement le module Python
         try:
-            # Créer un nom de module unique basé sur le nom du fichier
+            # 1. Chargement du module
             module_name = os.path.basename(file_path).replace('.py', '')
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             module = importlib.util.module_from_spec(spec)
             
-            # Ajouter le dossier du module au PATH pour qu'il puisse trouver ses propres dépendances
             module_dir = os.path.dirname(file_path)
             if module_dir not in sys.path:
                 sys.path.append(module_dir)
             
-            # Exécuter le module
             spec.loader.exec_module(module)
             
-            # 2. Chercher une classe principale (QMainWindow ou QWidget) dans le module
+            # --- CORRECTION ICI : SÉLECTION INTELLIGENTE DE LA CLASSE ---
             target_class = None
-            
-            # Option A: Chercher une classe qui hérite de QMainWindow ou QWidget
+            candidates = []
+
             for name, obj in inspect.getmembers(module):
-                if inspect.isclass(obj) and issubclass(obj, (QMainWindow, QWidget)):
-                    # On évite d'importer QMainWindow lui-même
-                    if obj.__module__ == module_name:
-                        target_class = obj
-                        break
+                # On ne regarde que les classes définies dans le fichier
+                if inspect.isclass(obj) and obj.__module__ == module_name:
+                    if issubclass(obj, (QMainWindow, QWidget)):
+                        # Vérification des arguments (pour éviter l'erreur KPI_Card)
+                        try:
+                            sig = inspect.signature(obj.__init__)
+                            # On cherche les constructeurs sans arguments obligatoires
+                            params = [p for p in sig.parameters.values() 
+                                      if p.name != 'self' and p.default == inspect.Parameter.empty]
+                            
+                            if len(params) == 0:
+                                candidates.append(obj)
+                        except ValueError:
+                            continue
+
+            # STRATÉGIE DE CHOIX :
+            # 1. Si on trouve une QMainWindow, c'est sûrement l'app principale (ex: Allocation Ambulances)
+            #    Cela évite de charger le graphique (QWidget) au lieu de l'app.
+            for c in candidates:
+                if issubclass(c, QMainWindow):
+                    target_class = c
+                    break
             
+            # 2. Sinon, on prend la dernière classe trouvée (Souvent la classe principale est à la fin)
+            if not target_class and candidates:
+                target_class = candidates[-1]
+
             if target_class:
-                # Instancier la classe
                 app_widget = target_class()
-                
-                # Ajouter l'instance comme un nouvel onglet
                 new_tab_index = self.tabs.addTab(app_widget, title)
                 self.tabs.setCurrentIndex(new_tab_index)
-                print(f"Module {module_name} chargé avec succès.")
+                print(f"Module {module_name} chargé : {target_class.__name__}")
             else:
                 QMessageBox.warning(self, "Erreur d'intégration", 
-                                    f"Aucune classe 'QMainWindow' ou 'QWidget' trouvée dans {file_path}.\n"
-                                    "Le fichier doit contenir une classe principale.")
+                                    f"Aucune classe principale compatible trouvée dans {file_path}.")
 
         except Exception as e:
             import traceback

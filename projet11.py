@@ -1,10 +1,3 @@
-#version finale du projet
-"""
-OptiRoute_Ultimate_Edition.py
-Logiciel d'Optimisation de Tournées (VRPTW) - Version Enterprise Finale.
-Fonctionnalités : Moteur Gurobi, Validation Stricte, Sauvegarde JSON, Export CSV.
-"""
-
 import sys
 import json
 import csv
@@ -28,7 +21,7 @@ except ImportError:
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
-# --- CONFIGURATION GRAPHIQUE PRO ---
+# --- CONFIGURATION GRAPHIQUE ---
 C_PRIMARY = "#2c3e50"    # Bleu Nuit
 C_ACCENT  = "#2980b9"    # Bleu Action
 C_SUCCESS = "#27ae60"    # Vert
@@ -76,7 +69,7 @@ except ImportError:
 # -----------------------------
 class OptiRouteWindow(QMainWindow):
     
-    # --- CLASSE INTERNE POUR KPI (Cachée du Hub) ---
+    # --- CLASSE INTERNE POUR KPI ---
     class KPI_Card(QFrame):
         def __init__(self, title, icon, color=C_SUCCESS):
             super().__init__()
@@ -111,7 +104,7 @@ class OptiRouteWindow(QMainWindow):
         self.resize(1800, 800)
         self.setStyleSheet(STYLESHEET)
         
-        self.last_schedule_data = None # Pour stocker les données à exporter
+        self.last_schedule_data = None 
         
         self._init_ui()
         self._create_actions()
@@ -164,7 +157,7 @@ class OptiRouteWindow(QMainWindow):
             self.tabs.addTab(w, title)
             return table
 
-        self.dist_table = create_tab("📍 Distances", "Matrice des temps de trajet en minutes")
+        self.dist_table = create_tab("📍 Distances (Symétriques)", "Matrice des temps de trajet en minutes")
         self.service_table = create_tab("🔧 Services", "Temps de service en minutes")
         self.tw_table = create_tab("⏰ Horaires", "Fenêtres [Ouverture, Fermeture]")
         left_layout.addWidget(self.tabs)
@@ -185,7 +178,6 @@ class OptiRouteWindow(QMainWindow):
         right_layout.addWidget(lbl_dash)
 
         kpi_layout = QHBoxLayout()
-        # Appel via self.KPI_Card car la classe est maintenant interne
         self.kpi_dist = self.KPI_Card("Distance Totale", "📏", C_ACCENT)
         self.kpi_time = self.KPI_Card("Heure Retour", "🏁", C_WARNING)
         self.kpi_stat = self.KPI_Card("Statut", "🤖", C_PRIMARY)
@@ -209,7 +201,7 @@ class OptiRouteWindow(QMainWindow):
         l_log = QVBoxLayout()
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
-        self.results_text.setStyleSheet("border: 1px solid #dfe6e9; font-family: Consolas; font-size: 12px;")
+        self.results_text.setStyleSheet("border: 1px solid #dfe6e9; font-family: 'Segoe UI', Consolas; font-size: 12px;")
         l_log.addWidget(self.results_text)
         grp_log.setLayout(l_log)
         right_layout.addWidget(grp_log, 1)
@@ -285,29 +277,58 @@ class OptiRouteWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.status.showMessage("Prêt. Veuillez configurer les données.")
 
-    # --- LOGIQUE TABLEAUX ---
+    # --- LOGIQUE TABLEAUX (SYMETRIE AUTOMATIQUE) ---
     def create_tables(self):
+        # On bloque les signaux pendant la construction pour éviter les boucles
+        self.dist_table.blockSignals(True)
+        
         n_Machines = self.spin_n.value()
         N = n_Machines + 1 
         headers = [f"Dépôt" if i==0 else f"Machine {i}" for i in range(N)]
 
+        # --- 1. TABLEAU DES DISTANCES (DIAGONALE VERROUILLÉE) ---
         self.dist_table.setRowCount(N); self.dist_table.setColumnCount(N)
         self.dist_table.setHorizontalHeaderLabels(headers); self.dist_table.setVerticalHeaderLabels(headers)
         self.dist_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        
         for i in range(N):
             for j in range(N):
-                if not self.dist_table.item(i, j): 
-                    val = "0" if i==j else "15"
-                    self.dist_table.setItem(i, j, QTableWidgetItem(val))
+                # Si c'est la diagonale (Depot-Depot, M1-M1, etc.)
+                if i == j:
+                    item = QTableWidgetItem("0")
+                    item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable) # Non modifiable
+                    item.setBackground(QtGui.QColor("#ecf0f1")) # Fond gris
+                    item.setForeground(QtGui.QColor("#7f8c8d")) # Texte gris
+                    self.dist_table.setItem(i, j, item)
+                else:
+                    if not self.dist_table.item(i, j): 
+                        self.dist_table.setItem(i, j, QTableWidgetItem("15"))
+        
+        # Connexion du signal pour la symétrie
+        self.dist_table.blockSignals(False)
+        # On déconnecte d'abord pour éviter les duplications de connexion si appelée plusieurs fois
+        try: self.dist_table.itemChanged.disconnect()
+        except: pass
+        self.dist_table.itemChanged.connect(self.on_dist_changed)
 
+        # --- 2. TABLEAU DES SERVICES (DEPOT VERROUILLÉ) ---
         self.service_table.setRowCount(N); self.service_table.setColumnCount(1)
         self.service_table.setHorizontalHeaderLabels(["Durée en minutes"]); self.service_table.setVerticalHeaderLabels(headers)
         self.service_table.horizontalHeader().setStretchLastSection(True)
+        
         for i in range(N):
-            if not self.service_table.item(i, 0):
-                val = "0" if i==0 else "10"
-                self.service_table.setItem(i, 0, QTableWidgetItem(val))
+            if i == 0:
+                # Verrouillage du service au Dépôt
+                item = QTableWidgetItem("0")
+                item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+                item.setBackground(QtGui.QColor("#ecf0f1"))
+                item.setForeground(QtGui.QColor("#7f8c8d"))
+                self.service_table.setItem(i, 0, item)
+            else:
+                if not self.service_table.item(i, 0):
+                    self.service_table.setItem(i, 0, QTableWidgetItem("10"))
 
+        # --- 3. TABLEAU DES HORAIRES ---
         self.tw_table.setRowCount(N); self.tw_table.setColumnCount(2)
         self.tw_table.setHorizontalHeaderLabels(["Ouverture", "Fermeture"]); self.tw_table.setVerticalHeaderLabels(headers)
         self.tw_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -316,6 +337,26 @@ class OptiRouteWindow(QMainWindow):
             if not self.tw_table.item(i, 0):
                 self.tw_table.setItem(i, 0, QTableWidgetItem("0"))
                 self.tw_table.setItem(i, 1, QTableWidgetItem(max_s))
+
+    # --- NOUVELLE FONCTION DE SYMETRIE ---
+    def on_dist_changed(self, item):
+        row = item.row()
+        col = item.column()
+        
+        # Pas de symétrie sur la diagonale (déjà gérée)
+        if row == col: return
+
+        # On bloque les signaux pour éviter la boucle infinie (A change B, B change A...)
+        self.dist_table.blockSignals(True)
+        
+        mirror_item = self.dist_table.item(col, row)
+        if mirror_item:
+            mirror_item.setText(item.text())
+        else:
+            self.dist_table.setItem(col, row, QTableWidgetItem(item.text()))
+            
+        # On réactive les signaux
+        self.dist_table.blockSignals(False)
 
     def on_reset(self):
         box = QMessageBox(self)
@@ -379,9 +420,17 @@ class OptiRouteWindow(QMainWindow):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                
+                # Bloquer les signaux pendant le chargement pour éviter le ralentissement symétrique
+                self.dist_table.blockSignals(True)
+                
                 self.spin_n.setValue(data["n_Machines"])
                 self.edit_max_shift.setText(data["max_shift"])
-                self.create_tables() 
+                self.create_tables() # Recrée la structure
+                
+                # Re-bloquer car create_tables a pu débloquer
+                self.dist_table.blockSignals(True)
+                
                 N = data["n_Machines"] + 1
                 dist = data["dist"]
                 service = data["service"]
@@ -389,10 +438,17 @@ class OptiRouteWindow(QMainWindow):
                 tw_l = data["tw_l"]
                 for i in range(N):
                     for j in range(N):
-                        self.dist_table.setItem(i, j, QTableWidgetItem(str(dist[i][j])))
-                    self.service_table.setItem(i, 0, QTableWidgetItem(str(service[i])))
+                        if i != j:
+                            self.dist_table.setItem(i, j, QTableWidgetItem(str(dist[i][j])))
+                    
+                    if i != 0:
+                        self.service_table.setItem(i, 0, QTableWidgetItem(str(service[i])))
+                    
                     self.tw_table.setItem(i, 0, QTableWidgetItem(str(tw_e[i])))
                     self.tw_table.setItem(i, 1, QTableWidgetItem(str(tw_l[i])))
+                
+                self.dist_table.blockSignals(False) # Réactiver la symétrie dynamique
+                
                 self.status.showMessage(f"Chargé : {file_path}")
                 self.kpi_stat.set_value("Chargé")
                 self.results_text.clear(); self.ax.clear(); self.canvas.draw()
@@ -453,8 +509,13 @@ class OptiRouteWindow(QMainWindow):
                 if not ok: errors.append(f"• Distance [{i}->{j}] : {msg}")
                 else:
                     if val < 0: errors.append(f"• Distance [{i}->{j}] : < 0 interdite.")
-                    if i == j and val != 0: errors.append(f"• Distance [{i}->{j}] : Diagonale != 0.")
                     dist[i,j] = val
+                
+                # SÉCURITÉ 1 : On force la diagonale à 0
+                if i == j: dist[i,j] = 0.0
+                # SÉCURITÉ 2 : On force la symétrie mathématique (cas où l'utilisateur copierait/collerait bizarrement)
+                # On prend la valeur [i,j] comme vérité si j > i (triangle sup)
+                # Mais avec l'interface synchro, dist[i,j] devrait égaler dist[j,i]
 
         service = np.zeros(N)
         for i in range(N):
@@ -463,8 +524,10 @@ class OptiRouteWindow(QMainWindow):
             if not ok: errors.append(f"• Service {i} : {msg}")
             else:
                 if val < 0: errors.append(f"• Service {i} : < 0 interdit.")
-                if i > 0 and val == 0: errors.append(f"• Service {i} : Doit être > 0.")
                 service[i] = val
+        
+        # SÉCURITÉ : On force service dépôt à 0
+        service[0] = 0.0
 
         tw_e = np.zeros(N); tw_l = np.zeros(N)
         for i in range(N):
@@ -482,7 +545,7 @@ class OptiRouteWindow(QMainWindow):
             raise ValueError("\n".join(d_err))
         return N, dist, service, tw_e, tw_l, max_shift
 
-    # --- MOTEUR D'OPTIMISATION FLEXIBLE ---
+    # --- MOTEUR D'OPTIMISATION ---
     def solve_engine(self, N, dist, serv, tw_e, tw_l, time_limit, must_visit_all=True):
         model = Model("VRPTW_Smart")
         model.setParam('OutputFlag', 0)
@@ -490,8 +553,8 @@ class OptiRouteWindow(QMainWindow):
         x = {}; t = {}; y = {} 
         
         for i in range(N):
-            if must_visit_all or i == 0:
-                y[i] = 1 
+            if i == 0:
+                y[i] = 1 # Depot toujours visité
             else:
                 y[i] = model.addVar(vtype=GRB.BINARY, name=f"visit_{i}")
             for j in range(N):
@@ -502,20 +565,26 @@ class OptiRouteWindow(QMainWindow):
 
         dist_cost = quicksum(dist[i,j]*x[i,j] for i in range(N) for j in range(N) if i!=j)
         
+        penalty = 100000 
+        missed_cost = quicksum(penalty * (1 - y[i]) for i in range(1, N))
+        
         if must_visit_all:
-            model.setObjective(dist_cost, GRB.MINIMIZE)
+             model.setObjective(dist_cost, GRB.MINIMIZE)
         else:
-            penalty = 100000 
-            missed_cost = quicksum(penalty * (1 - y[i]) for i in range(1, N))
-            model.setObjective(dist_cost + missed_cost, GRB.MINIMIZE)
+             model.setObjective(dist_cost + missed_cost, GRB.MINIMIZE)
 
         for i in range(N):
             model.addConstr(quicksum(x[i,j] for j in range(N) if i!=j) == y[i])
             model.addConstr(quicksum(x[j,i] for j in range(N) if i!=j) == y[i])
 
-        M = time_limit + 1000
+        M = max(time_limit, np.max(tw_l)) + np.sum(dist) + 1000
+
+        for i in range(1, N):
+            min_trip = max(dist[0,i], tw_e[i]) + serv[i] + dist[i,0]
+            if min_trip > time_limit:
+                 model.addConstr(y[i] == 0, name=f"Impossible_{i}")
+
         for i in range(N):
-            # FIX: Ensure service finishes before closing, else y[i] must be 0
             model.addConstr(t[i] + serv[i] <= tw_l[i] + M * (1 - y[i])) 
             
             for j in range(1, N):
@@ -526,10 +595,11 @@ class OptiRouteWindow(QMainWindow):
             model.addConstr(t_end >= t[i] + serv[i] + dist[i,0] - M*(1-x[i,0]))
         
         model.addConstr(t_end <= time_limit)
+        
         model.optimize()
         return model, x, t, t_end, y
     
-    # --- RÉSOLUTION INTELLIGENTE ---
+    # --- RÉSOLUTION ---
     def on_solve(self):
         if Model is None: QMessageBox.critical(self, "Erreur", "Gurobi absent."); return
         try:
@@ -540,13 +610,18 @@ class OptiRouteWindow(QMainWindow):
             return
         
         depot_close = tw_l[0]
+        
         if max_shift > depot_close:
-            msg_text = (f"La durée max définie ({max_shift} min) est supérieure à l'heure de fermeture du dépôt ({depot_close} min).\n"
-                        f"Le camion devra rentrer avant {depot_close} min.\n"
+            msg_text = (f"⚠️ <b>Avertissement de Planification</b><br><br>"
+                        f"La durée maximale configurée (Max Shift) dépasse l'heure de fermeture du dépôt :<br>"
+                        f"<ul><li>Durée Shift demandée : <b>{max_shift} min</b></li>"
+                        f"<li>Fermeture Dépôt (impérative) : <b>{depot_close} min</b></li></ul>"
+                        f"Le camion sera contraint de rentrer à {depot_close} min.<br>"
                         f"Voulez-vous continuer ?")
+            
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
-            box.setWindowTitle("Avertissement Logique")
+            box.setWindowTitle("Contrainte Horaire")
             box.setText(msg_text)
             btn_oui = box.addButton("Oui, continuer", QMessageBox.ButtonRole.YesRole)
             btn_non = box.addButton("Non, annuler", QMessageBox.ButtonRole.NoRole)
@@ -555,18 +630,25 @@ class OptiRouteWindow(QMainWindow):
                 self.status.showMessage("Optimisation annulée.")
                 return
 
+        real_limit = min(max_shift, depot_close)
+        
+        impossible_indices = []
+        for i in range(1, N):
+             min_trip = max(dist[0,i], tw_e[i]) + service[i] + dist[i,0]
+             if min_trip > real_limit:
+                 impossible_indices.append(i)
+
         self.status.showMessage("Calcul en cours...")
         QApplication.processEvents()
 
-        model_theo, _, _, _, _ = self.solve_engine(N, dist, service, tw_e, tw_l, max_shift, must_visit_all=True)
-        is_theo_feasible = (model_theo.status == GRB.OPTIMAL)
-        
-        real_limit = min(max_shift, depot_close)
         model_real, x_re, t_re, t_end_re, y_re = self.solve_engine(N, dist, service, tw_e, tw_l, real_limit, must_visit_all=False)
 
         if model_real.status != GRB.OPTIMAL:
             self.kpi_stat.set_value("Erreur")
-            QMessageBox.critical(self, "Echec", "Le solveur n'a pas trouvé de solution.")
+            QMessageBox.critical(self, "Echec Optimisation", 
+                                 "❌ <b>Aucune solution trouvée</b><br><br>"
+                                 "Le solveur n'a pas pu construire de tournée.<br>"
+                                 "Vérifiez vos contraintes (Horaires incohérents, fermeture dépôt trop tôt).")
             return
 
         visited = []
@@ -578,14 +660,14 @@ class OptiRouteWindow(QMainWindow):
 
         if len(missed) > 0:
             self.kpi_stat.set_value("Partiel")
-            self.status.showMessage(f"Terminé. {len(missed)} Machines non livrés.")
+            self.status.showMessage(f"Terminé. {len(missed)} Machines non réparées.")
         else:
             self.kpi_stat.set_value("Optimal")
-            self.status.showMessage("Succès. Tous les Machines livrés.")
+            self.status.showMessage("Succès. Toutes les Machines réparées.")
 
-        self.display_smart_visuals(x_re, t_re, t_end_re, visited, missed, N, service, dist, tw_e, is_theo_feasible, depot_close)
+        self.display_smart_visuals(x_re, t_re, t_end_re, visited, missed, impossible_indices, N, service, dist, tw_e, depot_close)
 
-    def display_smart_visuals(self, x, t, t_end, visited, missed, N, service, dist, tw_e, is_theo_feasible, depot_close):
+    def display_smart_visuals(self, x, t, t_end, visited, missed, impossible_indices, N, service, dist, tw_e, depot_close):
         tour = [0]
         curr = 0
         arcs = []
@@ -601,49 +683,65 @@ class OptiRouteWindow(QMainWindow):
             if curr == 0 or not found: break
         
         self.last_schedule_data = []
-        cur_t = 0.0
-        start = max(cur_t, tw_e[0])
-        end = start + service[0]
-        self.last_schedule_data.append({"n":0, "t":"Départ Dépôt", "a":start, "s":service[0], "d":end})
+        
+        start_time = t[0].X if hasattr(t[0], "X") else tw_e[0]
+        cur_t = start_time
+        end = cur_t + service[0]
+        self.last_schedule_data.append({"n":0, "t":"Départ Dépôt", "a":cur_t, "s":service[0], "d":end})
         cur_t = end
         prev = 0
         tot_d = 0.0
         
-        for n in tour[1:-1]:
-            tr = dist[prev, n]
+        if len(tour) > 1:
+            for n in tour[1:-1]:
+                tr = dist[prev, n]
+                tot_d += tr
+                arr = cur_t + tr
+                gurobi_arr = t[n].X if hasattr(t[n], "X") else arr
+                s_start = max(arr, gurobi_arr)
+                s_end = s_start + service[n]
+                self.last_schedule_data.append({"n":n, "t":"Machine Livré", "a":s_start, "s":service[n], "d":s_end})
+                cur_t = s_end
+                prev = n
+                
+            tr = dist[prev, 0]
             tot_d += tr
             arr = cur_t + tr
-            s_start = max(arr, tw_e[n])
-            s_end = s_start + service[n]
-            self.last_schedule_data.append({"n":n, "t":"Machine Livré", "a":arr, "s":service[n], "d":s_end})
-            cur_t = s_end
-            prev = n
-            
-        tr = dist[prev, 0]
-        tot_d += tr
-        arr = cur_t + tr
-        self.last_schedule_data.append({"n":0, "t":"Retour Dépôt", "a":arr, "s":0, "d":arr})
+            self.last_schedule_data.append({"n":0, "t":"Retour Dépôt", "a":arr, "s":0, "d":arr})
+        else:
+             self.last_schedule_data.append({"n":0, "t":"Retour Dépôt", "a":cur_t, "s":0, "d":cur_t})
+             arr = cur_t
 
         self.kpi_dist.set_value(f"{tot_d:.1f} min")
         self.kpi_time.set_value(f"{arr:.1f} min")
         
-        html = "<h3 style='color:#2c3e50; font-family: Segoe UI;'>Rapport de Mission</h3>"
+        style_ok = f"background-color:#eafaf1; border-left: 5px solid {C_SUCCESS}; padding:10px;"
+        style_warn = f"background-color:#fff3cd; border-left: 5px solid {C_WARNING}; padding:10px;"
+        style_err = f"color:{C_DANGER}; font-weight:bold;"
+        
+        html = "<div style='font-family: Segoe UI, sans-serif;'>"
+        html += "<h3 style='color:#2c3e50;'>Rapport de Mission</h3>"
         
         if missed:
-            html += f"<div style='background-color:#fdedec; border:1px solid {C_DANGER}; padding:10px; border-radius:4px;'>"
-            html += f"<b style='color:{C_DANGER}'>⚠️ MISSION PARTIELLE : {len(missed)} Machine(s) annulé(s).</b><br>"
-            html += f"Le camion est rentré à <b>{arr:.1f} min</b> (Fermeture : {depot_close} min).<br>"
-            if is_theo_feasible:
-                html += "<i>Une tournée complète était théoriquement possible si le dépôt restait ouvert plus longtemps.</i>"
-            else:
-                html += "<i>Même sans fermeture du dépôt, la durée max était insuffisante pour tout livrer.</i>"
+            html += f"<div style='{style_warn}'>"
+            html += f"<h3>⚠️ Succès Partiel</h3>"
+            html += f"{len(visited)} machines réparées sur {N-1}.<br>"
+            html += f"Retour au dépôt à <b>{arr:.1f} min</b> (Limite : {depot_close} min)."
             html += "</div><br>"
-            html += f"<b style='color:{C_DANGER}'>Machines non livrés :</b><ul>"
-            for m in missed: html += f"<li>Machine {m}</li>"
-            html += "</ul>"
+            
+            html += f"<b style='color:{C_DANGER}'>Analyse des échecs ({len(missed)}) :</b><ul>"
+            for m in missed: 
+                if m in impossible_indices:
+                    reason = "<b>Distance Excessive</b> : Le trajet aller-retour dépasse la durée de la journée."
+                else:
+                    reason = "<b>Conflit Horaire</b> : Incompatible avec l'itinéraire des autres machines."
+                html += f"<li>Machine {m} : {reason}</li>"
+            html += "</ul><br>"
         else:
-            html += f"<div style='background-color:#eafaf1; border:1px solid {C_SUCCESS}; padding:10px; border-radius:4px;'>"
-            html += f"<b style='color:{C_SUCCESS}'>✅ MISSION RÉUSSIE : Tous les Machines sont livrés.</b>"
+            html += f"<div style='{style_ok}'>"
+            html += f"<h3>✅ Succès Total</h3>"
+            html += f"Toutes les machines ({N-1}) ont été réparées.<br>"
+            html += f"Retour au dépôt à <b>{arr:.1f} min</b>."
             html += "</div><br>"
 
         html += "<table width='100%' border='1' cellspacing='0' cellpadding='5' style='border-collapse:collapse; border-color:#ddd;'>"
@@ -654,7 +752,8 @@ class OptiRouteWindow(QMainWindow):
             else: color = "#2c3e50"
             nm = "HUB" if s['n']==0 else f"Machine {s['n']}"
             html += f"<tr style='color:{color}'><td><b>{s['t']}</b></td><td>{nm}</td><td>{s['a']:.1f}</td><td>{s['d']:.1f}</td></tr>"
-        html += "</table>"
+        html += "</table></div>"
+        
         self.results_text.setHtml(html)
 
         self.ax.clear()

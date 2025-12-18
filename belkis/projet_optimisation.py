@@ -14,26 +14,26 @@ class VRPTransportFonds:
     Fonction objectif = coût variable (distance, risque) + coût fixe véhicule utilisé
     """
     def __init__(self):
+        # Initialise le modèle VRP et les attributs de solution/statut.
         self.model = None
         self.solution = None
         self.status = None
 
     def resoudre(self,
-                 n_clients: int,
-                 n_vehicules: int,
-                 capacite_vehicule: float,
-                 demandes: List[float],
-                 distances: np.ndarray,
-                 fenetres_temps: List[Tuple[float, float]],
-                 temps_service: List[float],
-                 noms_clients: List[str] = None,
-                 niveaux_danger: np.ndarray = None,
-                 cout_km: float = 0.8,
-                 cout_danger: float = 50.0,
-                 cout_fixe_vehicule: float = 350.0,
-                 poids_distance: float = 1.0,
-                 poids_danger: float = 1.0,
-                 danger_max_autorise: float = None
+        n_clients: int,
+        n_vehicules: int,
+        demandes: List[float],
+        distances: np.ndarray,
+        fenetres_temps: List[Tuple[float, float]],
+        temps_service: List[float],
+        capacites_vehicules: List[float],
+        rij: np.ndarray, 
+        beta: float,
+        noms_clients: List[str] = None,
+        niveaux_danger: np.ndarray = None,
+        cout_km: float = 0.8,
+        cout_fixe_vehicule: float = 350.0,
+        danger_max_autorise: float = None
     ) -> Dict:
 
         self.model = gp.Model("VRP_Transport_Fonds_Tunisie")
@@ -41,7 +41,6 @@ class VRPTransportFonds:
 
         n = n_clients
         K = n_vehicules
-        Q = capacite_vehicule
 
         V = range(n + 1)
         C = range(1, n + 1)
@@ -55,9 +54,7 @@ class VRPTransportFonds:
         couts = np.zeros((n + 1, n + 1))
         for i in V:
             for j in V:
-                cout_dist = distances[i][j] * cout_km * poids_distance
-                cout_risk = niveaux_danger[i][j] * cout_danger * poids_danger
-                couts[i][j] = cout_dist + cout_risk
+                couts[i][j] = distances[i][j] * cout_km * (1 + beta * rij[i][j])
 
         x = self.model.addVars(V, V, Vehicules, vtype=GRB.BINARY, name="x")
         t = self.model.addVars(V, vtype=GRB.CONTINUOUS, lb=0, name="t")
@@ -91,10 +88,9 @@ class VRPTransportFonds:
             self.model.addConstr(gp.quicksum(x[i, 0, k] for i in C) <= 1, name=f"retour_depot_{k}")
             self.model.addConstr(
                 gp.quicksum(demandes[i - 1] * gp.quicksum(x[i, j, k] for j in V if j != i)
-                            for i in C) <= Q,
+                            for i in C) <= capacites_vehicules[k],
                 name=f"capacite_{k}"
             )
-
         for i in C:
             a_i, b_i = fenetres_temps[i - 1]
             self.model.addConstr(t[i] >= a_i, name=f"fenetre_min_{i}")
@@ -172,9 +168,49 @@ class VRPTransportFonds:
             }
         elif self.model.Status == GRB.INFEASIBLE:
             self.status = "INFEASIBLE"
+            motifs = []
+
+            # 1. Demande > capacité max véhicule
+            demande_max = max(demandes)
+            cap_max = max(capacites_vehicules)
+            if demande_max > cap_max:
+                motifs.append(
+                    f"Au moins une agence ({demande_max:.0f} TND) demande plus que la capacité max des camions ({cap_max:.0f} TND)."
+                )
+
+            # 2. Somme des demandes > somme des capacités de la flotte
+            if sum(demandes) > sum(capacites_vehicules):
+                motifs.append(
+                    f"La somme totale des demandes ({sum(demandes):.0f} TND) dépasse la capacité totale de la flotte ({sum(capacites_vehicules):.0f} TND)."
+                )
+
+            # 3. Fenêtres de temps trop courtes
+            for idx, (a, b) in enumerate(fenetres_temps):
+                if b - a < 15:  # 15 minutes de marge minimum, à adapter selon service
+                    motifs.append(
+                        f"La fenêtre de temps de l'agence {noms_clients[idx] if noms_clients else idx+1} est trop courte pour être desservie ({a}–{b} min après 8h)."
+                    )
+
+            # 4. Route(s) interdite(s) pour cause de danger
+            if danger_max_autorise is not None and niveaux_danger is not None:
+                for i in range(len(niveaux_danger)):
+                    accessibles = any(
+                        niveaux_danger[i][j] <= danger_max_autorise or niveaux_danger[j][i] <= danger_max_autorise
+                        for j in range(len(niveaux_danger)) if i != j
+                    )
+                    if not accessibles:
+                        agence = noms_clients[i - 1] if (noms_clients and i > 0) else f"Agence {i}"
+                        motifs.append(
+                            f"L'agence {agence} n'est accessible par aucun trajet au danger permis (danger max = {danger_max_autorise})."
+                        )
+            
+            # 5. Générique si rien n'a matché
+            if not motifs:
+                motifs.append("Aucune solution trouvée – contraintes impossibles à satisfaire (ex : contraintes horaires, géographiques, autres limitations).")
+
             self.solution = {
                 'status': 'INFAISABLE',
-                'message': 'Aucune solution trouvée – contraintes impossibles à satisfaire'
+                'message': "\n".join(motifs)
             }
         else:
             self.status = "AUTRE"

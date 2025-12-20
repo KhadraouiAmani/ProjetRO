@@ -9,7 +9,7 @@ from math import radians, sin, cos, sqrt, atan2
 R = 6371.0  # rayon de la Terre en km
 
 
-#
+#calcule la distance haversine entre deux points GPS
 def haversine_km(lat1, lon1, lat2, lon2):
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)

@@ -2,11 +2,10 @@ import numpy as np
 from gurobipy import Model, GRB, quicksum
 import pulp
 
-# cette fonction résout le problème dynamique avec une approche STRICTE sur la couverture
-# mais SOUPLE sur l'ouverture des hôpitaux (pour économiser le budget).
+
 # paramètres:
 # A: matrice de couverture (n adresses x m hôpitaux)
-# p: probabilités d'indisponibilité pour chaque ambulance 
+# p: indisponibilité pour chaque ambulance 
 # budget: Montant total disponible pour l'achat des ambulances 
 # cost_per_amb: Coût unitaire d'une ambulance
 # min_per_hop: Minimum souhaité d'ambulances par hôpital (défaut=1)
@@ -31,14 +30,13 @@ def solve_dynamic_expected(A, p, budget=None, cost_per_amb=None, min_per_hop=1):
     # Cela permet de "sacrifier" un hôpital pour respecter le budget.
     e = model.addVars(m, vtype=GRB.BINARY, name='e')
 
-    # NOTE : La variable 'u' (non couvert) a été RETIRÉE.
-    # La couverture est maintenant une contrainte stricte (Hard Constraint).
+    
 
     # fonction objective
 
-    # Objectif : Minimiser le nombre total d'ambulances + les Pénalités d'hôpitaux vides
+    # Objectif : Minimiser (le nombre total d'ambulances + les Pénalités d'hôpitaux vides)
     # On ne met plus de pénalité de couverture car la non-couverture est interdite.
-    M2 = 10 # Poids moyen pour la pénalité "hôpital vide" (équité)
+    M2 = 1 # Poids moyen pour la pénalité "hôpital vide" (équité)
 
     objective = quicksum(x[j] for j in range(m)) + \
                 (M2 * quicksum(e[j] for j in range(m)))
@@ -51,12 +49,12 @@ def solve_dynamic_expected(A, p, budget=None, cost_per_amb=None, min_per_hop=1):
 
     # A. Contrainte de Couverture (STRICTE)
     for i in range(n): 
-        # La capacité doit être >= 1. Pas de "- u[i]".
         # C'est une obligation absolue de sécurité.
-        # la capacité est la somme des ambulances placées dans les hôpitaux qui couvrent l'adresse i
         model.addConstr(sum(A[i,j] * (1-p[j]) * x[j] for j in range(m)) >= 1, name=f'cov_{i}')
+         #chaque adresse i doit être couverte par au moins une ambulance libre
+        
 
-    # B. Contrainte de Minimum par Hôpital (SOUPLE)
+    # B. Contrainte de au mpin une ambulance par Hôpital (SOUPLE)
     if min_per_hop > 0:
         for j in range(m):
             # x[j] doit être >= 1, SAUF si e[j]=1 (pénalité payée).
@@ -64,7 +62,7 @@ def solve_dynamic_expected(A, p, budget=None, cost_per_amb=None, min_per_hop=1):
             model.addConstr(x[j] >= min_per_hop - e[j], name=f'min_h_{j}')
 
     # C. Contrainte de Budget (STRICTE)
-    # C'est la seule contrainte qu'on ne peut pas violer (on n'a pas l'argent magique).
+    #  contrainte qu'on ne peut pas violer 
     if budget is not None and cost_per_amb is not None and cost_per_amb > 0:
         total_cost = sum(x[j] * cost_per_amb for j in range(m))
         model.addConstr(total_cost <= budget, name='Budget_Limit')
@@ -84,4 +82,4 @@ def solve_dynamic_expected(A, p, budget=None, cost_per_amb=None, min_per_hop=1):
     
     # Si une solution optimale est trouvée,
     # on extrait les valeurs pour savoir combien d'ambulances placer dans chaque hôpital
-    # et on renvoie le résultat. Sinon, on signale l'échec.
+    # et on renvoie le résultat. Sinon, on signale l'échec.
